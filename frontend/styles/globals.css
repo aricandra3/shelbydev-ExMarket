@@ -1,0 +1,137 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  html {
+    scroll-behavior: smooth;
+    color-scheme: dark;
+  }
+
+  body {
+    @apply bg-surface-0 text-white antialiased;
+    font-family: "Inter", system-ui, -apple-system, sans-serif;
+  }
+
+  ::selection {
+    @apply bg-brand-600/40 text-white;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-surface-1;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-surface-4 rounded-full;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-brand-600;
+  }
+}
+
+@layer components {
+  /* ── Glass Card ─────────────────────────────── */
+  .glass-card {
+    @apply bg-surface-2/60 backdrop-blur-xl border border-white/[0.06]
+           rounded-2xl shadow-lg shadow-black/20;
+  }
+
+  .glass-card-hover {
+    @apply glass-card transition-all duration-300
+           hover:border-brand-500/20 hover:shadow-brand-500/5 hover:shadow-xl
+           hover:-translate-y-0.5;
+  }
+
+  /* ── Gradient Button ────────────────────────── */
+  .btn-primary {
+    @apply relative px-6 py-3 rounded-xl font-semibold text-sm
+           bg-gradient-to-r from-brand-600 to-brand-500
+           text-white transition-all duration-200
+           hover:from-brand-500 hover:to-brand-400
+           hover:shadow-lg hover:shadow-brand-500/25
+           active:scale-[0.98]
+           disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-none;
+  }
+
+  .btn-secondary {
+    @apply px-6 py-3 rounded-xl font-semibold text-sm
+           bg-surface-3 border border-white/[0.08] text-white/80
+           transition-all duration-200
+           hover:bg-surface-4 hover:text-white hover:border-white/[0.12]
+           active:scale-[0.98]
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-ghost {
+    @apply px-4 py-2 rounded-lg font-medium text-sm
+           text-white/60 transition-all duration-200
+           hover:text-white hover:bg-white/[0.06]
+           active:scale-[0.98];
+  }
+
+  /* ── Input ──────────────────────────────────── */
+  .input-field {
+    @apply w-full px-4 py-3 rounded-xl text-sm
+           bg-surface-1 border border-white/[0.08] text-white
+           placeholder:text-white/30
+           transition-all duration-200
+           focus:outline-none focus:border-brand-500/50 focus:ring-2 focus:ring-brand-500/20;
+  }
+
+  .textarea-field {
+    @apply input-field resize-none;
+  }
+
+  /* ── Badge ──────────────────────────────────── */
+  .badge {
+    @apply inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-medium;
+  }
+
+  .badge-brand {
+    @apply badge bg-brand-500/15 text-brand-400;
+  }
+
+  .badge-green {
+    @apply badge bg-accent-green/15 text-accent-green;
+  }
+
+  .badge-amber {
+    @apply badge bg-accent-amber/15 text-accent-amber;
+  }
+
+  /* ── Section ────────────────────────────────── */
+  .section-title {
+    @apply text-2xl font-bold text-white;
+  }
+
+  .section-subtitle {
+    @apply text-white/50 text-sm mt-1;
+  }
+
+  /* ── Skeleton Loader ────────────────────────── */
+  .skeleton {
+    @apply bg-surface-3 rounded-lg animate-pulse;
+  }
+}
+
+@layer utilities {
+  .text-gradient {
+    @apply bg-gradient-to-r from-brand-400 via-brand-300 to-brand-500
+           bg-clip-text text-transparent;
+  }
+
+  .glow-brand {
+    box-shadow: 0 0 40px rgba(92, 124, 250, 0.15),
+      0 0 80px rgba(92, 124, 250, 0.05);
+  }
+}

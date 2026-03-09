@@ -1,0 +1,12 @@
+[package]
+name = "ExMarket"
+version = "1.0.0"
+authors = ["ExMarket Team"]
+
+[addresses]
+exmarket = "0x743d4d9ce1bacb43a9d4caaf65e4ddfaf3fef2645da1e83d0ce26ef2fb1266fe"
+
+[dependencies.AptosFramework]
+git = "https://github.com/aptos-labs/aptos-core.git"
+rev = "testnet"
+subdir = "aptos-move/framework/aptos-framework"
