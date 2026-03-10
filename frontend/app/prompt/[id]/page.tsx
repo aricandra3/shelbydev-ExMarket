@@ -102,9 +102,9 @@ export default function PromptDetailPage() {
                 {/* Header Card */}
                 <div className="glass-card p-8">
                     <div className="flex items-start justify-between mb-4">
-                        <div className="badge-brand">{prompt.category}</div>
+                        <div className="badge-primary">{prompt.category}</div>
                         <div className="text-right">
-                            <div className="text-2xl font-bold text-brand-400">
+                            <div className="text-2xl font-bold text-primary-400">
                                 {formatApt(prompt.price)}
                             </div>
                             <div className="text-xs text-white/30 capitalize">

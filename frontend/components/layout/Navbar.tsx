@@ -28,7 +28,7 @@ export function Navbar() {
                         <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-brand-500 to-brand-700
                             flex items-center justify-center text-white font-bold text-sm
                             group-hover:shadow-lg group-hover:shadow-brand-500/20 transition-shadow">
-                            Ex
+                            <img src="" alt="" />
                         </div>
                         <span className="font-bold text-lg text-white">
                             ExMarket
