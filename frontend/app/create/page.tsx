@@ -12,6 +12,7 @@ import { aptToOctas, PROMPT_CATEGORIES } from "@/lib/constants";
 import { PRICING_MODEL_REVERSE } from "@/types";
 import type { PricingModel } from "@/types";
 import { AccountAddress } from "@aptos-labs/ts-sdk";
+import { motion, AnimatePresence } from "framer-motion";
 
 export default function CreatePage() {
     const router = useRouter();
@@ -117,205 +118,289 @@ export default function CreatePage() {
         }
     };
 
+    // Render early exit for disconnected wallet
     if (!connected) {
         return (
             <div className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-                <div className="glass-card p-12 text-center">
+                <motion.div
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    className="glass-card p-12 text-center"
+                >
                     <h2 className="text-xl font-semibold text-white mb-4">
                         Connect Your Wallet
                     </h2>
                     <p className="text-white/40">
                         Connect your Aptos wallet to start creating prompts.
                     </p>
-                </div>
-            </div>
-        );
-    }
-
-    if (step === "success") {
-        return (
-            <div className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-                <div className="glass-card p-12 text-center">
-                    <div className="text-5xl mb-4">🎉</div>
-                    <h2 className="text-2xl font-bold text-white mb-2">
-                        Prompt Published!
-                    </h2>
-                    <p className="text-white/50 mb-6">
-                        Your prompt is now live on the marketplace.
-                    </p>
-                    {txHash && (
-                        <p className="text-xs text-white/30 font-mono mb-6 break-all">
-                            tx: {txHash}
-                        </p>
-                    )}
-                    <button
-                        onClick={() => router.push("/dashboard")}
-                        className="btn-primary"
-                    >
-                        Go to Dashboard
-                    </button>
-                </div>
+                </motion.div>
             </div>
         );
     }
 
     return (
-        <div className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-            <h1 className="section-title mb-2">Create Prompt</h1>
-            <p className="section-subtitle mb-8">
-                Upload your prompt to Shelby and list it on the marketplace
-            </p>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+            <div className="mb-8">
+                <h1 className="text-4xl md:text-5xl font-display font-extrabold tracking-tight text-white mb-4">
+                    Create Prompt
+                </h1>
+                <p className="text-lg text-white/50">
+                    List your instructions on the decentralized marketplace
+                </p>
+            </div>
 
-            <form onSubmit={handleSubmit} className="space-y-6">
-                <div className="glass-card p-8 space-y-5">
-                    {/* Title */}
-                    <div>
-                        <label className="block text-sm font-medium text-white/60 mb-2">
-                            Title
-                        </label>
-                        <input
-                            type="text"
-                            required
-                            className="input-field"
-                            placeholder="e.g. Ultimate SEO Blog Post Generator"
-                            value={form.title}
-                            onChange={(e) => setForm({ ...form, title: e.target.value })}
-                        />
-                    </div>
-
-                    {/* Description */}
-                    <div>
-                        <label className="block text-sm font-medium text-white/60 mb-2">
-                            Description
-                        </label>
-                        <textarea
-                            required
-                            rows={3}
-                            className="textarea-field"
-                            placeholder="Describe what your prompt does and who it's for..."
-                            value={form.description}
-                            onChange={(e) =>
-                                setForm({ ...form, description: e.target.value })
-                            }
-                        />
-                    </div>
-
-                    {/* Category */}
-                    <div>
-                        <label className="block text-sm font-medium text-white/60 mb-2">
-                            Category
-                        </label>
-                        <select
-                            className="input-field"
-                            value={form.category}
-                            onChange={(e) => setForm({ ...form, category: e.target.value })}
-                        >
-                            {PROMPT_CATEGORIES.map((cat) => (
-                                <option key={cat} value={cat}>
-                                    {cat}
-                                </option>
-                            ))}
-                        </select>
-                    </div>
-
-                    {/* Tags */}
-                    <div>
-                        <label className="block text-sm font-medium text-white/60 mb-2">
-                            Tags (comma-separated)
-                        </label>
-                        <input
-                            type="text"
-                            className="input-field"
-                            placeholder="e.g. seo, blog, marketing"
-                            value={form.tags}
-                            onChange={(e) => setForm({ ...form, tags: e.target.value })}
-                        />
-                    </div>
-
-                    {/* Pricing Model */}
-                    <div>
-                        <label className="block text-sm font-medium text-white/60 mb-2">
-                            Pricing Model
-                        </label>
-                        <div className="grid grid-cols-3 gap-3">
-                            {(
-                                [
-                                    { key: "pay-per-unlock", label: "Pay-per-Unlock", icon: "🔓" },
-                                    { key: "subscription", label: "Subscription", icon: "📅" },
-                                    { key: "api-pay-per-call", label: "API Pay-per-Call", icon: "⚡" },
-                                ] as const
-                            ).map((model) => (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
+                {/* Left side Start - Form */}
+                <div className="space-y-8 relative">
+                    <AnimatePresence mode="wait">
+                        {step === "success" ? (
+                            <motion.div
+                                key="success"
+                                initial={{ opacity: 0, scale: 0.95, y: 10 }}
+                                animate={{ opacity: 1, scale: 1, y: 0 }}
+                                exit={{ opacity: 0, scale: 0.95, y: -10 }}
+                                transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+                                className="glass-card p-12 text-center"
+                            >
+                                <div className="text-5xl mb-4">🎉</div>
+                                <h2 className="text-2xl font-bold text-white mb-2">
+                                    Prompt Published!
+                                </h2>
+                                <p className="text-white/50 mb-6">
+                                    Your prompt is now live on the marketplace.
+                                </p>
+                                {txHash && (
+                                    <p className="text-xs text-white/30 font-mono mb-6 break-all">
+                                        tx: {txHash}
+                                    </p>
+                                )}
                                 <button
-                                    key={model.key}
-                                    type="button"
-                                    onClick={() =>
-                                        setForm({ ...form, pricingModel: model.key })
-                                    }
-                                    className={`p-3 rounded-xl border text-center transition-all text-xs font-medium ${form.pricingModel === model.key
-                                        ? "border-brand-500/50 bg-brand-500/10 text-brand-400"
-                                        : "border-white/[0.06] text-white/40 hover:border-white/[0.12]"
-                                        }`}
+                                    onClick={() => router.push("/dashboard")}
+                                    className="btn-primary"
                                 >
-                                    <div className="text-lg mb-1">{model.icon}</div>
-                                    {model.label}
+                                    Go to Dashboard
                                 </button>
-                            ))}
+                            </motion.div>
+                        ) : (
+                            <motion.div
+                                key="form"
+                                initial={{ opacity: 0, y: 20 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0, y: -20 }}
+                                transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+                            >
+                                <form onSubmit={handleSubmit} className="space-y-6">
+                                    <div className="glass-card p-8 space-y-5">
+                                        {/* Title */}
+                                        <div>
+                                            <label className="block text-sm font-medium text-white/60 mb-2">
+                                                Title
+                                            </label>
+                                            <input
+                                                type="text"
+                                                required
+                                                className="input-field"
+                                                placeholder="e.g. Ultimate SEO Blog Post Generator"
+                                                value={form.title}
+                                                onChange={(e) => setForm({ ...form, title: e.target.value })}
+                                            />
+                                        </div>
+
+                                        {/* Description */}
+                                        <div>
+                                            <label className="block text-sm font-medium text-white/60 mb-2">
+                                                Description
+                                            </label>
+                                            <textarea
+                                                required
+                                                rows={3}
+                                                className="textarea-field"
+                                                placeholder="Describe what your prompt does and who it's for..."
+                                                value={form.description}
+                                                onChange={(e) =>
+                                                    setForm({ ...form, description: e.target.value })
+                                                }
+                                            />
+                                        </div>
+
+                                        {/* Category */}
+                                        <div>
+                                            <label className="block text-sm font-medium text-white/60 mb-2">
+                                                Category
+                                            </label>
+                                            <select
+                                                className="input-field"
+                                                value={form.category}
+                                                onChange={(e) => setForm({ ...form, category: e.target.value })}
+                                            >
+                                                {PROMPT_CATEGORIES.map((cat) => (
+                                                    <option key={cat} value={cat}>
+                                                        {cat}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </div>
+
+                                        {/* Tags */}
+                                        <div>
+                                            <label className="block text-sm font-medium text-white/60 mb-2">
+                                                Tags (comma-separated)
+                                            </label>
+                                            <input
+                                                type="text"
+                                                className="input-field"
+                                                placeholder="e.g. seo, blog, marketing"
+                                                value={form.tags}
+                                                onChange={(e) => setForm({ ...form, tags: e.target.value })}
+                                            />
+                                        </div>
+
+                                        {/* Pricing Model */}
+                                        <div>
+                                            <label className="block text-sm font-medium text-white/60 mb-2">
+                                                Pricing Model
+                                            </label>
+                                            <div className="grid grid-cols-3 gap-3">
+                                                {(
+                                                    [
+                                                        { key: "pay-per-unlock", label: "Pay-per-Unlock", icon: "🔓" },
+                                                        { key: "subscription", label: "Subscription", icon: "📅" },
+                                                        { key: "api-pay-per-call", label: "API Pay-per-Call", icon: "⚡" },
+                                                    ] as const
+                                                ).map((model) => (
+                                                    <button
+                                                        key={model.key}
+                                                        type="button"
+                                                        onClick={() =>
+                                                            setForm({ ...form, pricingModel: model.key })
+                                                        }
+                                                        className={`p-3 rounded-xl border text-center transition-all text-xs font-medium ${form.pricingModel === model.key
+                                                            ? "border-primary-500/50 bg-primary-500/10 text-primary-400"
+                                                            : "border-white/[0.06] text-white/40 hover:border-white/[0.12]"
+                                                            }`}
+                                                    >
+                                                        <div className="text-lg mb-1">{model.icon}</div>
+                                                        {model.label}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+
+                                        {/* Price */}
+                                        <div>
+                                            <label className="block text-sm font-medium text-white/60 mb-2">
+                                                Price (APT)
+                                            </label>
+                                            <input
+                                                type="number"
+                                                required
+                                                min="0.001"
+                                                step="0.001"
+                                                className="input-field"
+                                                placeholder="0.1"
+                                                value={form.price}
+                                                onChange={(e) => setForm({ ...form, price: e.target.value })}
+                                            />
+                                        </div>
+                                    </div>
+
+                                    {/* Prompt Content */}
+                                    <div className="glass-card p-8">
+                                        <label className="block text-sm font-medium text-white/60 mb-2">
+                                            Prompt Content
+                                        </label>
+                                        <textarea
+                                            required
+                                            rows={12}
+                                            className="textarea-field font-mono text-sm"
+                                            placeholder="Paste your full prompt content here. This will be stored on Shelby and only visible to buyers."
+                                            value={form.content}
+                                            onChange={(e) => setForm({ ...form, content: e.target.value })}
+                                        />
+                                        <p className="text-xs text-white/20 mt-2">
+                                            This content is stored on Shelby decentralized storage. It will only
+                                            be accessible to users who pay to unlock it.
+                                        </p>
+                                    </div>
+
+                                    {/* Submit */}
+                                    <button
+                                        type="submit"
+                                        disabled={step === "uploading" || step === "registering"}
+                                        className="btn-primary w-full py-4 text-base relative overflow-hidden flex justify-center"
+                                    >
+                                        <AnimatePresence mode="popLayout">
+                                            <motion.span
+                                                key={step}
+                                                initial={{ y: 20, opacity: 0 }}
+                                                animate={{ y: 0, opacity: 1 }}
+                                                exit={{ y: -20, opacity: 0 }}
+                                                transition={{ duration: 0.3 }}
+                                                className="block"
+                                            >
+                                                {step === "form" && "Publish Prompt"}
+                                                {step === "uploading" && "Uploading to Shelby..."}
+                                                {step === "registering" && "Registering on-chain..."}
+                                                {step === "error" && "Try Again"}
+                                            </motion.span>
+                                        </AnimatePresence>
+                                    </button>
+
+                                    {error && (
+                                        <motion.p
+                                            initial={{ opacity: 0, height: 0 }}
+                                            animate={{ opacity: 1, height: "auto" }}
+                                            className="text-accent-red text-sm text-center"
+                                        >
+                                            {error}
+                                        </motion.p>
+                                    )}
+                                </form>
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
+                </div>
+
+                {/* Right side Start - Live Preview */}
+                <div className="hidden lg:block relative">
+                    <div className="sticky top-24">
+                        <h3 className="text-sm font-bold text-white/40 tracking-widest uppercase mb-6">
+                            Live Preview
+                        </h3>
+                        <div className="glass-card p-6 rotate-1 hover:rotate-0 transition-transform duration-500 max-w-sm ml-auto mr-12 bg-surface-1/80 backdrop-blur-xl border-t border-l border-white/[0.1]">
+                            <div className="flex items-start justify-between mb-4">
+                                <div className="badge-primary">{form.category || "Category"}</div>
+                                <div className="text-right">
+                                    <div className="text-2xl font-bold text-primary-400">
+                                        {form.price || "0"} APT
+                                    </div>
+                                    <div className="text-xs text-white/50 capitalize">
+                                        {form.pricingModel.replace(/-/g, " ")}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <h3 className="text-xl font-bold text-white mb-2 line-clamp-2 min-h-[56px]">
+                                {form.title || "Your Prompt Title"}
+                            </h3>
+                            <p className="text-sm text-white/60 mb-6 line-clamp-2 min-h-[40px]">
+                                {form.description || "A brief description of what this prompt does and how to use it..."}
+                            </p>
+
+                            <div className="flex items-center justify-between pt-4 border-t border-white/[0.04]">
+                                <span className="text-xs font-mono text-white/40">
+                                    by {account?.address ? `${account.address.substring(0, 6)}...${account.address.substring(account.address.length - 4)}` : "you"}
+                                </span>
+                                <div className="flex gap-2">
+                                    <span className="text-xs bg-surface-3 px-2 py-1 rounded-md text-white/50">{form.category}</span>
+                                </div>
+                            </div>
                         </div>
-                    </div>
-
-                    {/* Price */}
-                    <div>
-                        <label className="block text-sm font-medium text-white/60 mb-2">
-                            Price (APT)
-                        </label>
-                        <input
-                            type="number"
-                            required
-                            min="0.001"
-                            step="0.001"
-                            className="input-field"
-                            placeholder="0.1"
-                            value={form.price}
-                            onChange={(e) => setForm({ ...form, price: e.target.value })}
-                        />
+                        {/* Decorative glow behind preview */}
+                        <div className="absolute top-20 right-12 w-64 h-64 bg-primary-500/20 blur-[100px] pointer-events-none -z-10" />
                     </div>
                 </div>
-
-                {/* Prompt Content */}
-                <div className="glass-card p-8">
-                    <label className="block text-sm font-medium text-white/60 mb-2">
-                        Prompt Content
-                    </label>
-                    <textarea
-                        required
-                        rows={12}
-                        className="textarea-field font-mono text-sm"
-                        placeholder="Paste your full prompt content here. This will be stored on Shelby and only visible to buyers."
-                        value={form.content}
-                        onChange={(e) => setForm({ ...form, content: e.target.value })}
-                    />
-                    <p className="text-xs text-white/20 mt-2">
-                        This content is stored on Shelby decentralized storage. It will only
-                        be accessible to users who pay to unlock it.
-                    </p>
-                </div>
-
-                {/* Submit */}
-                <button
-                    type="submit"
-                    disabled={step === "uploading" || step === "registering"}
-                    className="btn-primary w-full py-4 text-base"
-                >
-                    {step === "form" && "Publish Prompt"}
-                    {step === "uploading" && "Uploading to Shelby..."}
-                    {step === "registering" && "Registering on-chain..."}
-                    {step === "error" && "Try Again"}
-                </button>
-
-                {error && (
-                    <p className="text-accent-red text-sm text-center">{error}</p>
-                )}
-            </form>
+            </div>
         </div>
     );
 }

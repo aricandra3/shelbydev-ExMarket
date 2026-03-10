@@ -76,7 +76,7 @@ export default function LibraryPage() {
                             className="glass-card-hover p-6 flex items-center justify-between block"
                         >
                             <div>
-                                <div className="badge-brand text-[10px] mb-2">
+                                <div className="badge-primary text-[10px] mb-2">
                                     {prompt.category}
                                 </div>
                                 <h3 className="text-base font-semibold text-white">

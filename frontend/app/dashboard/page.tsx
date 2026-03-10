@@ -7,6 +7,7 @@ import { useWallet } from "@aptos-labs/wallet-adapter-react";
 import { useCreatorDashboard } from "@/hooks/useCreatorDashboard";
 import { formatApt } from "@/lib/constants";
 import { truncateAddress } from "@/lib/utils";
+import { motion } from "framer-motion";
 
 export default function DashboardPage() {
     const { account, connected } = useWallet();
@@ -44,7 +45,12 @@ export default function DashboardPage() {
             </div>
 
             {/* Stats Grid */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+            <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.4 }}
+                className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8"
+            >
                 {[
                     {
                         label: "Total Revenue",
@@ -54,7 +60,7 @@ export default function DashboardPage() {
                     {
                         label: "Total Unlocks",
                         value: loading ? "..." : totalUnlocks.toString(),
-                        color: "text-brand-400",
+                        color: "text-primary-400",
                     },
                     {
                         label: "Active Prompts",
@@ -66,15 +72,21 @@ export default function DashboardPage() {
                         value: loading ? "..." : prompts.length.toString(),
                         color: "text-white/60",
                     },
-                ].map((stat) => (
-                    <div key={stat.label} className="glass-card p-5">
+                ].map((stat, i) => (
+                    <motion.div
+                        key={stat.label}
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.4, delay: i * 0.1 }}
+                        className="glass-card p-5 holographic-hover"
+                    >
                         <div className={`text-2xl font-bold ${stat.color}`}>
                             {stat.value}
                         </div>
                         <div className="text-xs text-white/40 mt-1">{stat.label}</div>
-                    </div>
+                    </motion.div>
                 ))}
-            </div>
+            </motion.div>
 
             {/* Prompt List */}
             <div className="glass-card overflow-hidden">
@@ -85,7 +97,13 @@ export default function DashboardPage() {
                 {loading ? (
                     <div className="p-6 space-y-4">
                         {Array.from({ length: 3 }).map((_, i) => (
-                            <div key={i} className="skeleton h-12 w-full" />
+                            <motion.div
+                                key={i}
+                                initial={{ opacity: 0, x: -20 }}
+                                animate={{ opacity: 1, x: 0 }}
+                                transition={{ duration: 0.4, delay: i * 0.1 }}
+                                className="skeleton h-12 w-full"
+                            />
                         ))}
                     </div>
                 ) : prompts.length === 0 ? (
@@ -98,43 +116,53 @@ export default function DashboardPage() {
                         </Link>
                     </div>
                 ) : (
-                    <div className="divide-y divide-white/[0.04]">
-                        {prompts.map((prompt) => (
-                            <Link
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        className="divide-y divide-white/[0.04]"
+                    >
+                        {prompts.map((prompt, i) => (
+                            <motion.div
                                 key={prompt.promptId}
-                                href={`/prompt/${prompt.promptId}`}
-                                className="flex items-center justify-between px-6 py-4
-                           hover:bg-white/[0.02] transition-colors"
+                                initial={{ opacity: 0, x: -20 }}
+                                animate={{ opacity: 1, x: 0 }}
+                                transition={{ duration: 0.3, delay: i * 0.05 }}
                             >
-                                <div className="flex-1 min-w-0">
-                                    <div className="flex items-center gap-2">
-                                        <h3 className="text-sm font-medium text-white truncate">
-                                            {prompt.title}
-                                        </h3>
-                                        <span
-                                            className={`badge text-[10px] ${prompt.status === "active"
+                                <Link
+                                    href={`/prompt/${prompt.promptId}`}
+                                    className="flex items-center justify-between px-6 py-4
+                               hover:bg-white/[0.02] transition-colors"
+                                >
+                                    <div className="flex-1 min-w-0">
+                                        <div className="flex items-center gap-2">
+                                            <h3 className="text-sm font-medium text-white truncate">
+                                                {prompt.title}
+                                            </h3>
+                                            <span
+                                                className={`badge text-[10px] ${prompt.status === "active"
                                                     ? "badge-green"
                                                     : "bg-white/[0.06] text-white/30"
-                                                }`}
-                                        >
-                                            {prompt.status}
-                                        </span>
+                                                    }`}
+                                            >
+                                                {prompt.status}
+                                            </span>
+                                        </div>
+                                        <div className="text-xs text-white/30 mt-0.5">
+                                            {prompt.category} • {prompt.pricingModel.replace(/-/g, " ")}
+                                        </div>
                                     </div>
-                                    <div className="text-xs text-white/30 mt-0.5">
-                                        {prompt.category} • {prompt.pricingModel.replace(/-/g, " ")}
+                                    <div className="text-right shrink-0 ml-4">
+                                        <div className="text-sm font-medium text-accent-green">
+                                            {formatApt(prompt.totalRevenue)}
+                                        </div>
+                                        <div className="text-xs text-white/30">
+                                            {prompt.totalUnlocks} unlocks
+                                        </div>
                                     </div>
-                                </div>
-                                <div className="text-right shrink-0 ml-4">
-                                    <div className="text-sm font-medium text-accent-green">
-                                        {formatApt(prompt.totalRevenue)}
-                                    </div>
-                                    <div className="text-xs text-white/30">
-                                        {prompt.totalUnlocks} unlocks
-                                    </div>
-                                </div>
-                            </Link>
+                                </Link>
+                            </motion.div>
                         ))}
-                    </div>
+                    </motion.div>
                 )}
             </div>
         </div>
