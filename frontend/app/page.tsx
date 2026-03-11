@@ -1,199 +1,218 @@
-/// Landing Page — Hero + Features + How It Works
+/// Landing Page — ExMarket Hero
 
 "use client";
 
 import Link from "next/link";
 import { useWallet } from "@aptos-labs/wallet-adapter-react";
 import { motion } from "framer-motion";
+import type { Variants } from "framer-motion";
 
+// ── Animation ─────────────────────────────────────────────
+const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
+
+const stagger: Variants = {
+    hidden: {},
+    show: { transition: { staggerChildren: 0.1, delayChildren: 0.05 } },
+};
+
+const rise: Variants = {
+    hidden: { opacity: 0, y: 18 },
+    show: { opacity: 1, y: 0, transition: { duration: 0.65, ease: EASE } },
+};
+
+// ── Data ──────────────────────────────────────────────────
+const STATS = [
+    { value: "2,400+", label: "Prompts listed" },
+    { value: "180+",   label: "Creators" },
+    { value: "Aptos",  label: "Chain" },
+];
+
+const FEATURES = [
+    {
+        icon: (
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <rect x="3" y="3" width="14" height="14" rx="2" />
+                <path d="M7 10h6M10 7v6" />
+            </svg>
+        ),
+        title: "Publish anything",
+        body: "Midjourney styles, ChatGPT templates, agent workflows — if it's a prompt, ExMarket can list it.",
+    },
+    {
+        icon: (
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M10 2L3 7v6l7 5 7-5V7l-7-5z" />
+                <path d="M10 2v15M3 7l7 5 7-5" />
+            </svg>
+        ),
+        title: "On-chain ownership",
+        body: "Every listing is stored via the Shelby protocol. Your content, your keys, your permanent record.",
+    },
+    {
+        icon: (
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <circle cx="10" cy="10" r="7" />
+                <path d="M10 6v4l3 2" />
+            </svg>
+        ),
+        title: "Instant payouts",
+        body: "Royalties settle in seconds, not days. No intermediary holds your revenue.",
+    },
+];
+
+// ── Component ─────────────────────────────────────────────
 export default function HomePage() {
     const { connected } = useWallet();
 
     return (
-        <div className="relative overflow-hidden">
-            {/* Background glow */}
-            <div className="absolute inset-0 bg-hero-glow pointer-events-none" />
+        <div className="flex flex-col">
 
-            {/* Hero Section */}
-            <section className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-24 pb-20">
+            {/* ── Hero ──────────────────────────────────────────────── */}
+            <section className="relative min-h-[92vh] flex flex-col items-center justify-center text-center px-6 overflow-hidden">
+
+                {/* Dot grid — original brand texture */}
+                <div
+                    aria-hidden
+                    className="pointer-events-none absolute inset-0 z-0 opacity-[0.18]"
+                    style={{
+                        backgroundImage:
+                            "radial-gradient(circle, rgba(139,92,246,0.6) 1px, transparent 1px)",
+                        backgroundSize: "32px 32px",
+                        maskImage:
+                            "radial-gradient(ellipse 80% 80% at 50% 50%, black 30%, transparent 100%)",
+                        WebkitMaskImage:
+                            "radial-gradient(ellipse 80% 80% at 50% 50%, black 30%, transparent 100%)",
+                    }}
+                />
+
+                {/* Core glow */}
+                <div
+                    aria-hidden
+                    className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] rounded-full z-0"
+                    style={{
+                        background:
+                            "radial-gradient(circle, rgba(124,58,237,0.12) 0%, transparent 70%)",
+                    }}
+                />
+
+                {/* Content */}
                 <motion.div
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
-                    className="text-center"
+                    className="relative z-10 flex flex-col items-center max-w-2xl mx-auto"
+                    variants={stagger}
+                    initial="hidden"
+                    animate="show"
                 >
-                    <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full
-                          bg-primary-500/10 border border-primary-500/20 mb-8">
-                        <span className="w-1.5 h-1.5 rounded-full bg-primary-400 animate-pulse-glow" />
-                        <span className="text-xs font-medium text-primary-400">
-                            Powered by Aptos + Shelby Protocol
+                    {/* Pill badge */}
+                    <motion.div variants={rise} className="mb-7">
+                        <span className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full text-[11px] font-medium tracking-wide text-primary-300 bg-primary-950/80 border border-primary-800/50 backdrop-blur-sm">
+                            <span className="w-1.5 h-1.5 rounded-full bg-primary-400 animate-pulse" />
+                            Shelby Protocol · Aptos Network
                         </span>
-                    </div>
+                    </motion.div>
 
-                    <h1 className="text-5xl sm:text-6xl lg:text-7xl font-extrabold tracking-tight">
-                        <span className="text-white">The AI Prompt</span>
-                        <br />
-                        <span className="text-gradient">Marketplace</span>
-                    </h1>
+                    {/* H1 */}
+                    <motion.h1
+                        variants={rise}
+                        className="text-[2.75rem] sm:text-[3.5rem] lg:text-[4.25rem] font-bold leading-[1.08] tracking-tight text-white mb-5"
+                    >
+                        The marketplace for{" "}
+                        <br className="hidden sm:block" />
+                        <span className="text-gradient">AI prompt creators.</span>
+                    </motion.h1>
 
-                    <p className="mt-6 max-w-2xl mx-auto text-lg text-white/50 leading-relaxed">
-                        Buy, sell, and access premium AI prompts, agent workflows, and
-                        automation templates. Pay-per-use. Fully decentralized.
-                        Creator-first.
-                    </p>
+                    {/* Sub */}
+                    <motion.p
+                        variants={rise}
+                        className="text-base sm:text-lg text-white/40 max-w-md leading-relaxed mb-9"
+                    >
+                        Upload your work. Set a price. Earn every time someone buys. 
+                        No platform fees holding you back.
+                    </motion.p>
 
-                    <div className="mt-10 flex items-center justify-center gap-4">
-                        <Link href="/explore" className="btn-primary text-base px-8 py-4">
-                            Explore Prompts
+                    {/* CTAs */}
+                    <motion.div
+                        variants={rise}
+                        className="flex items-center gap-3 flex-wrap justify-center mb-12"
+                    >
+                        <Link
+                            href={connected ? "/create" : "/explore"}
+                            className="btn-primary text-sm"
+                        >
+                            {connected ? "Upload a Prompt" : "Browse Marketplace"}
                         </Link>
-                        {connected && (
-                            <Link href="/create" className="btn-secondary text-base px-8 py-4">
-                                Start Creating
+                        {!connected && (
+                            <Link
+                                href="/create"
+                                className="px-5 py-2.5 text-sm font-medium text-white/50 border border-white/[0.08] rounded-lg hover:text-white hover:border-white/20 transition-colors"
+                            >
+                                Sell your prompts →
                             </Link>
                         )}
-                    </div>
+                    </motion.div>
+
+                    {/* Stats row */}
+                    <motion.div
+                        variants={rise}
+                        className="flex items-center gap-8 sm:gap-12 flex-wrap justify-center"
+                    >
+                        {STATS.map((s) => (
+                            <div key={s.label} className="flex flex-col items-center gap-0.5">
+                                <span className="text-lg font-bold text-white tabular-nums">{s.value}</span>
+                                <span className="text-[11px] text-white/30 uppercase tracking-widest">{s.label}</span>
+                            </div>
+                        ))}
+                    </motion.div>
                 </motion.div>
 
-                {/* Bento Box Stats Section */}
+                {/* Bottom fade to section */}
+                <div
+                    aria-hidden
+                    className="pointer-events-none absolute bottom-0 left-0 right-0 h-32 z-10"
+                    style={{
+                        background: "linear-gradient(to bottom, transparent, #09090b)",
+                    }}
+                />
             </section>
-            <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 relative z-10">
-                <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6">
-                    {/* Big Feature Component */}
-                    <motion.div
-                        initial={{ opacity: 0, y: 20 }}
-                        whileInView={{ opacity: 1, y: 0 }}
-                        viewport={{ once: true }}
-                        className="glass-card p-8 md:col-span-2 lg:col-span-2 row-span-2 flex flex-col justify-between group"
-                    >
-                        <div>
-                            <div className="badge-primary mb-4">Volume</div>
-                            <h3 className="text-3xl font-display font-bold text-white mb-2">$42,500+</h3>
-                            <p className="text-white/50 text-sm">Creator Revenue Paid</p>
-                        </div>
-                        <div className="h-32 mt-6 rounded-xl bg-gradient-to-t from-primary-500/10 to-transparent border-b-2 border-primary-500/30 flex items-end">
-                            {/* Abstract chart simulation */}
-                            <div className="w-full flex items-end gap-2 px-4 h-full opacity-60 group-hover:opacity-100 transition-opacity">
-                                {[40, 60, 30, 80, 50, 90, 70, 100].map((h, i) => (
-                                    <div key={i} className="flex-1 bg-primary-500/40 rounded-t-sm" style={{ height: `${h}%` }}></div>
-                                ))}
-                            </div>
-                        </div>
-                    </motion.div>
 
-                    {/* Smaller Stat 1 */}
-                    <motion.div
-                        initial={{ opacity: 0, y: 20 }}
-                        whileInView={{ opacity: 1, y: 0 }}
-                        viewport={{ once: true }}
-                        transition={{ delay: 0.1 }}
-                        className="glass-card-hover p-8 md:col-span-1 lg:col-span-2 flex flex-col justify-center"
-                    >
-                        <h3 className="text-4xl font-display font-black text-white mb-2">10k+</h3>
-                        <p className="text-white/50">Active Users</p>
-                    </motion.div>
-
-                    {/* Smaller Stat 2 */}
-                    <motion.div
-                        initial={{ opacity: 0, y: 20 }}
-                        whileInView={{ opacity: 1, y: 0 }}
-                        viewport={{ once: true }}
-                        transition={{ delay: 0.2 }}
-                        className="glass-card p-6 md:col-span-1 lg:col-span-1"
-                    >
-                        <div className="w-10 h-10 rounded-full bg-surface-3 flex items-center justify-center mb-4 border border-white/[0.05]">
-                            ⚡️
-                        </div>
-                        <h3 className="text-2xl font-display font-bold text-white mb-1">50ms</h3>
-                        <p className="text-white/50 text-xs">Unlock Speed</p>
-                    </motion.div>
-
-                    {/* Smaller Stat 3 */}
-                    <motion.div
-                        initial={{ opacity: 0, y: 20 }}
-                        whileInView={{ opacity: 1, y: 0 }}
-                        viewport={{ once: true }}
-                        transition={{ delay: 0.3 }}
-                        className="glass-card p-6 md:col-span-1 lg:col-span-1 border-primary-500/20 bg-primary-500/5 group"
-                    >
-                        <h3 className="text-2xl font-display font-bold text-primary-400 mb-1 line-clamp-1">100%</h3>
-                        <p className="text-white/50 text-xs">Decentralized</p>
-                    </motion.div>
+            {/* ── Features ──────────────────────────────────────────── */}
+            <section className="relative py-20 px-6">
+                {/* Branded rule */}
+                <div className="max-w-4xl mx-auto mb-16 flex items-center gap-4">
+                    <div className="flex-1 h-px bg-white/5" />
+                    <span className="text-[10px] font-semibold uppercase tracking-[0.3em] text-white/20">
+                        How it works
+                    </span>
+                    <div className="flex-1 h-px bg-white/5" />
                 </div>
-            </section>
 
-            {/* How It Works */}
-            <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20">
-                <h2 className="section-title text-center">How It Works</h2>
-                <p className="section-subtitle text-center">
-                    Three steps to unlock premium AI prompts
-                </p>
-
-                <div className="mt-12 grid md:grid-cols-3 gap-6">
-                    {[
-                        {
-                            step: "01",
-                            title: "Connect Wallet",
-                            desc: "Connect your Aptos wallet to browse and purchase prompts.",
-                            icon: "🔗",
-                        },
-                        {
-                            step: "02",
-                            title: "Unlock Prompt",
-                            desc: "Pay with APT to unlock. 90% goes directly to the creator.",
-                            icon: "🔓",
-                        },
-                        {
-                            step: "03",
-                            title: "Use Instantly",
-                            desc: "Access your prompt immediately. Use via UI or API.",
-                            icon: "⚡",
-                        },
-                    ].map((item, index) => (
+                <motion.div
+                    className="max-w-4xl mx-auto grid grid-cols-1 sm:grid-cols-3 gap-px bg-white/5 rounded-2xl overflow-hidden"
+                    variants={stagger}
+                    initial="hidden"
+                    whileInView="show"
+                    viewport={{ once: true, margin: "-60px" }}
+                >
+                    {FEATURES.map((f, i) => (
                         <motion.div
-                            key={item.step}
-                            initial={{ opacity: 0, y: 30 }}
-                            whileInView={{ opacity: 1, y: 0 }}
-                            viewport={{ once: true, margin: "-50px" }}
-                            transition={{ duration: 0.5, delay: index * 0.15, ease: [0.22, 1, 0.36, 1] }}
-                            whileHover={{ y: -10 }}
-                            className="glass-card p-8 group"
+                            key={i}
+                            variants={rise}
+                            className="flex flex-col gap-4 p-8 bg-surface-1 hover:bg-surface-2 transition-colors group"
                         >
-                            <div className="text-4xl mb-4">{item.icon}</div>
-                            <div className="text-xs font-mono text-primary-400 mb-2">
-                                STEP {item.step}
+                            <div className="w-9 h-9 rounded-lg bg-primary-950 border border-primary-900/60 flex items-center justify-center text-primary-400 group-hover:text-primary-300 group-hover:border-primary-800 transition-colors">
+                                {f.icon}
                             </div>
-                            <h3 className="text-lg font-semibold text-white mb-2">
-                                {item.title}
-                            </h3>
-                            <p className="text-sm text-white/40 leading-relaxed">
-                                {item.desc}
-                            </p>
+                            <div>
+                                <h3 className="text-sm font-semibold text-white mb-1.5">{f.title}</h3>
+                                <p className="text-sm text-white/35 leading-relaxed">{f.body}</p>
+                            </div>
+                            <span className="text-[10px] font-mono text-white/20 mt-auto">
+                                0{i + 1}
+                            </span>
                         </motion.div>
                     ))}
-                </div>
-            </section>
-
-            {/* For Creators */}
-            <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20">
-                <motion.div
-                    initial={{ opacity: 0, y: 30 }}
-                    whileInView={{ opacity: 1, y: 0 }}
-                    viewport={{ once: true }}
-                    className="glass-card p-12 text-center glow-primary"
-                >
-                    <h2 className="text-3xl font-bold text-white mb-4">
-                        Built for Creators
-                    </h2>
-                    <p className="text-white/50 max-w-xl mx-auto mb-8">
-                        Upload your best prompts. Set your price. Earn 90% of every sale.
-                        No middlemen. No platform lock-in. Your content lives on
-                        decentralized storage forever.
-                    </p>
-                    <Link href="/create" className="btn-primary text-base px-8 py-4 inline-block">
-                        Start Selling Prompts →
-                    </Link>
                 </motion.div>
             </section>
+
         </div>
     );
 }
