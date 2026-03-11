@@ -95,28 +95,32 @@
 
   /* ── Badge ──────────────────────────────────── */
   .badge {
-    @apply inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-medium;
+    @apply inline-flex items-center px-3 py-1 rounded-md text-[10px] font-mono uppercase tracking-widest border;
   }
 
   .badge-primary {
-    @apply badge bg-primary-500/15 text-primary-400;
+    @apply badge border-primary-500/30 bg-primary-500/10 text-primary-400;
   }
 
   .badge-green {
-    @apply badge bg-accent-green/15 text-accent-green;
+    @apply badge border-emerald-500/30 bg-emerald-500/10 text-emerald-400;
   }
 
   .badge-amber {
-    @apply badge bg-accent-amber/15 text-accent-amber;
+    @apply badge border-amber-500/30 bg-amber-500/10 text-amber-400;
   }
 
-  /* ── Section ────────────────────────────────── */
+  /* ── Section & Editorial Typography ────────────────────────────────── */
   .section-title {
-    @apply text-3xl md:text-5xl font-display font-extrabold tracking-tight text-transparent bg-clip-text bg-gradient-to-br from-white to-white/70;
+    @apply text-4xl md:text-6xl font-display font-semibold text-white;
+  }
+
+  .section-title i {
+    @apply font-display italic text-white/70;
   }
 
   .section-subtitle {
-    @apply text-white/50 text-base md:text-lg mt-3 font-medium tracking-wide leading-relaxed;
+    @apply text-white/50 text-base md:text-lg mt-4 font-normal tracking-wide;
   }
 
   /* ── Skeleton Loader ────────────────────────── */
@@ -127,13 +131,13 @@
 
 @layer utilities {
   .text-gradient {
-    @apply bg-gradient-to-r from-primary-400 via-secondary-400 to-tertiary-500 bg-clip-text text-transparent;
+    @apply bg-gradient-to-r from-primary-400 via-secondary-300 to-white bg-clip-text text-transparent;
   }
 
   .glow-primary {
-    box-shadow: 0 0 40px rgba(139, 92, 246, 0.15),
-      0 0 80px rgba(217, 70, 239, 0.05);
-    /* violet to fuchsia glow */
+    box-shadow: 0 0 40px rgba(37, 99, 235, 0.15),
+      0 0 80px rgba(6, 182, 212, 0.05);
+    /* Deep blue to Cyan glow */
   }
 
   .bg-noise {
@@ -153,9 +157,9 @@
     @apply absolute inset-0 opacity-0 transition-opacity duration-500 rounded-2xl pointer-events-none;
     background: linear-gradient(105deg,
         transparent 20%,
-        rgba(139, 92, 246, 0.15) 30%,
-        rgba(217, 70, 239, 0.2) 50%,
-        rgba(139, 92, 246, 0.15) 70%,
+        rgba(37, 99, 235, 0.1) 30%,
+        rgba(6, 182, 212, 0.1) 50%,
+        rgba(37, 99, 235, 0.1) 70%,
         transparent 80%);
     z-index: 10;
   }

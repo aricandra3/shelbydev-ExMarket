@@ -9,9 +9,9 @@ import { ConnectButton } from "@/components/wallet/ConnectButton";
 import { cn } from "@/lib/utils";
 
 const NAV_LINKS = [
-    { href: "/explore", label: "Explore" },
-    { href: "/create", label: "Create" },
-    { href: "/library", label: "My Library" },
+    { href: "/explore", label: "Marketplace" },
+    { href: "/create", label: "Upload" },
+    { href: "/library", label: "Library" },
     { href: "/dashboard", label: "Dashboard" },
 ];
 
@@ -20,52 +20,55 @@ export function Navbar() {
     const { connected } = useWallet();
 
     return (
-        <nav className="sticky top-0 z-50 border-b border-white/[0.06] bg-surface-0/80 backdrop-blur-xl">
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <div className="flex items-center justify-between h-16">
-                    {/* Logo */}
+        <nav className="absolute top-0 w-full z-50 pt-8 pb-4">
+            <div className="max-w-[1400px] mx-auto px-6 lg:px-12">
+                <div className="flex items-center justify-between">
+
+                    {/* Logo — mark + wordmark */}
                     <Link href="/" className="flex items-center gap-2.5 group">
-                        <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-brand-500 to-brand-700
-                            flex items-center justify-center text-white font-bold text-sm
-                            group-hover:shadow-lg group-hover:shadow-brand-500/20 transition-shadow">
-                            <img src="" alt="" />
-                        </div>
-                        <span className="font-bold text-lg text-white">
+                        {/* Brand mark: small rounded square with gradient */}
+                        <span
+                            className="w-6 h-6 rounded-[5px] flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0"
+                            style={{ background: "linear-gradient(135deg, #7c3aed, #d946ef)" }}
+                        >
+                            E
+                        </span>
+                        <span className="text-[12px] font-semibold font-display text-white tracking-tight">
                             ExMarket
                         </span>
                     </Link>
 
-                    {/* Nav Links */}
-                    <div className="hidden md:flex items-center gap-1">
-                        {NAV_LINKS.map((link) => {
-                            // Hide creator-only links when not connected
-                            if (
-                                !connected &&
-                                (link.href === "/create" || link.href === "/dashboard" || link.href === "/library")
-                            ) {
-                                return null;
-                            }
+                    {/* Nav Links + Wallet */}
+                    <div className="flex items-center gap-5">
+                        <div className="hidden md:flex items-center gap-5 mr-2">
+                            {NAV_LINKS.map((link) => {
+                                if (
+                                    !connected &&
+                                    (link.href === "/create" || link.href === "/dashboard" || link.href === "/library")
+                                ) {
+                                    return null;
+                                }
 
-                            const isActive = pathname === link.href;
-                            return (
-                                <Link
-                                    key={link.href}
-                                    href={link.href}
-                                    className={cn(
-                                        "px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200",
-                                        isActive
-                                            ? "text-brand-400 bg-brand-500/10"
-                                            : "text-white/50 hover:text-white hover:bg-white/[0.04]"
-                                    )}
-                                >
-                                    {link.label}
-                                </Link>
-                            );
-                        })}
+                                const isActive = pathname === link.href;
+                                return (
+                                    <Link
+                                        key={link.href}
+                                        href={link.href}
+                                        className={cn(
+                                            "text-[12px] font-medium tracking-wide transition-colors",
+                                            isActive
+                                                ? "text-white"
+                                                : "text-white/35 hover:text-white/80"
+                                        )}
+                                    >
+                                        {link.label}
+                                    </Link>
+                                );
+                            })}
+                        </div>
+
+                        <ConnectButton />
                     </div>
-
-                    {/* Wallet */}
-                    <ConnectButton />
                 </div>
             </div>
         </nav>

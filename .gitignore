@@ -1,0 +1,12 @@
+# Antigravity Skills (local only, do not commit)
+antigravity/
+antigravity/skills/shelby
+# Aptos Move build artifacts
+contracts/build/
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+

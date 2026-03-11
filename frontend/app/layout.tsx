@@ -10,6 +10,7 @@ import "@/styles/globals.css";
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 const outfit = Outfit({ subsets: ["latin"], variable: "--font-outfit" });
 
+
 export const metadata: Metadata = {
     title: "ExMarket — AI Prompt Marketplace",
     description:
