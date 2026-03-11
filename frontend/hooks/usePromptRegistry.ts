@@ -1,9 +1,8 @@
-/// Hook: Fetch prompt listings (using on-chain events via indexer)
+/// Hook: Fetch prompt listings (using on-chain events via Aptos REST node API)
 
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { aptosClient } from "@/lib/aptos";
 import { getPromptMetadata } from "@/lib/contracts";
 import { MODULE_ADDRESS } from "@/lib/constants";
 import type { PromptMetadata } from "@/types";
@@ -18,22 +17,29 @@ export function usePromptRegistry(category?: string) {
         setError(null);
 
         try {
-            // Query PromptRegistered events from the indexer
-            const response = await aptosClient.queryIndexer({
-                query: {
-                    query: `
-                        query GetPromptEvents($eventType: String!) {
-                            events(where: {type: {_eq: $eventType}}) {
-                                data
-                            }
-                        }
-                    `,
-                    variables: {
-                        eventType: `${MODULE_ADDRESS}::prompt_registry::PromptRegistered`
-                    }
-                }
-            });
-            const events = (response as any).events || [];
+            // Aptos Indexer v2 has no events table. The only way to query #[event] module
+            // events is via the REST node API — each transaction response includes an `events[]`
+            // array. We scan account transactions for MODULE_ADDRESS, then filter client-side.
+            const eventsTarget = `${MODULE_ADDRESS}::prompt_registry::PromptRegistered`;
+            const { APTOS_NODE_URL, APTOS_API_KEY } = await import("@/lib/constants");
+            const headers: HeadersInit = APTOS_API_KEY
+                ? { Authorization: `Bearer ${APTOS_API_KEY}` }
+                : {};
+
+            // Fetch up to 500 recent transactions for the module account
+            const txResp = await fetch(
+                `${APTOS_NODE_URL}/accounts/${MODULE_ADDRESS}/transactions?limit=500`,
+                { headers }
+            );
+            if (!txResp.ok) {
+                throw new Error(`HTTP ${txResp.status}: ${txResp.statusText}`);
+            }
+            const txns: any[] = await txResp.json();
+
+            // Extract PromptRegistered events from each transaction
+            const events: any[] = txns.flatMap((tx: any) =>
+                (tx.events ?? []).filter((e: any) => e.type === eventsTarget)
+            );
 
             // Extract prompt IDs from events
             const promptIds: string[] = events.map(
