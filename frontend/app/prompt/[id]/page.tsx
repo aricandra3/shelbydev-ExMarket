@@ -1,31 +1,33 @@
 /// Prompt Detail Page — View metadata, unlock, and read content
+/// ACE decrypt flow: readEncryptedBlob → signMessage(domain) → aceDecrypt
 
 "use client";
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { useWallet } from "@aptos-labs/wallet-adapter-react";
+import { Ed25519PublicKey, Ed25519Signature } from "@aptos-labs/ts-sdk";
 import { useAccessCheck } from "@/hooks/useAccessCheck";
 import { useUnlockPrompt } from "@/hooks/useUnlockPrompt";
-import { useShelbyBlob } from "@/hooks/useShelbyBlob";
 import { getPromptMetadata } from "@/lib/contracts";
 import { formatApt } from "@/lib/constants";
 import { truncateAddress, timeAgo, copyToClipboard } from "@/lib/utils";
 import type { PromptMetadata } from "@/types";
+import { aceDecrypt, getSigningMessage } from "@/lib/ace";
 
 export default function PromptDetailPage() {
     const params = useParams();
     const promptId = params.id as string;
-    const { account, connected } = useWallet();
+    const { account, connected, signMessage } = useWallet();
 
     const [prompt, setPrompt] = useState<PromptMetadata | null>(null);
     const [loading, setLoading] = useState(true);
     const [content, setContent] = useState<string | null>(null);
+    const [decrypting, setDecrypting] = useState(false);
     const [copied, setCopied] = useState(false);
 
     const { hasAccess, loading: accessLoading, refresh: refreshAccess } = useAccessCheck(promptId);
     const { txState, unlockPrompt, purchaseApiCalls, reset } = useUnlockPrompt();
-    const { readBlob, reading } = useShelbyBlob();
 
     // Fetch prompt metadata
     useEffect(() => {
@@ -42,16 +44,57 @@ export default function PromptDetailPage() {
         if (promptId) load();
     }, [promptId]);
 
-    // Auto-load content if user has access
+    // Auto-decrypt and load content when user has access
     useEffect(() => {
-        async function loadContent() {
-            if (hasAccess && prompt?.blobId && !content) {
-                const blob = await readBlob(prompt.blobId);
-                if (blob) setContent(blob);
+        async function loadAndDecryptContent() {
+            if (!hasAccess || !prompt?.blobId || content || !account) return;
+            setDecrypting(true);
+            try {
+                // 1. Fetch the encrypted blob from Shelby
+                const { shelbyService } = await import("@/lib/shelby");
+                const { ciphertextHex, domainHex } = await shelbyService.readEncryptedBlob(prompt.blobId);
+
+                // 2. Ask the wallet to sign the ACE permission message
+                //    This proves to ACE workers that the user controls this account
+                const signingMessage = getSigningMessage(domainHex);
+                const signResponse = await signMessage({
+                    message: signingMessage,
+                    nonce: "",
+                });
+
+                // 3. Convert wallet adapter key/sig to proper SDK class instances
+                //    Wallet adapter returns plain objects; ACE SDK needs instanceof-compatible classes
+                const rawPk = account.publicKey;
+                const pkHex = typeof rawPk === "string" ? rawPk : (rawPk as any).toString();
+                const publicKey = new Ed25519PublicKey(pkHex);
+
+                const rawSig = signResponse.signature;
+                const sigHex = typeof rawSig === "string" ? rawSig : (rawSig as any).toString();
+                const signature = new Ed25519Signature(sigHex);
+
+                const fullMessage = signResponse.fullMessage;
+
+                // 4. ACE workers verify on-chain access and release decryption key
+                const plaintext = await aceDecrypt({
+                    ciphertextHex,
+                    domainHex,
+                    userAddr: account.address.toString(),
+                    publicKey,
+                    signature,
+                    fullMessage,
+                });
+
+                setContent(plaintext);
+            } catch (err: any) {
+                console.error("ACE decrypt failed:", err);
+                setContent(`⚠️ Decryption failed: ${err?.message ?? "Unknown error"}`);
+            } finally {
+                setDecrypting(false);
             }
         }
-        loadContent();
-    }, [hasAccess, prompt?.blobId, content, readBlob]);
+        loadAndDecryptContent();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [hasAccess, prompt?.blobId, account]);
 
     // After successful unlock, refresh access and load content
     useEffect(() => {
@@ -158,8 +201,13 @@ export default function PromptDetailPage() {
                                 </button>
                             </div>
 
-                            {reading ? (
-                                <div className="skeleton h-40 w-full rounded-xl" />
+                            {decrypting ? (
+                                <div className="space-y-3">
+                                    <div className="skeleton h-40 w-full rounded-xl" />
+                                    <p className="text-xs text-white/30 text-center">
+                                        ACE workers verifying on-chain access...
+                                    </p>
+                                </div>
                             ) : content ? (
                                 <div className="bg-surface-1 rounded-xl p-6 font-mono text-sm
                                 text-white/80 whitespace-pre-wrap max-h-[500px]

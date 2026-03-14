@@ -196,6 +196,23 @@ module exmarket::prompt_registry {
         });
     }
 
+    /// Creator updates the blob_id after uploading encrypted content to Shelby.
+    /// Used in the two-phase create flow: register first (get prompt_id),
+    /// then ACE-encrypt with the real prompt_id, upload blob, then update here.
+    public entry fun update_blob_id(
+        creator: &signer,
+        prompt_id: address,
+        new_blob_id: String,
+    ) acquires PromptMetadata {
+        let creator_addr = signer::address_of(creator);
+        let metadata = borrow_global_mut<PromptMetadata>(prompt_id);
+
+        assert!(metadata.creator == creator_addr, E_NOT_CREATOR);
+
+        metadata.blob_id = new_blob_id;
+        metadata.updated_at = timestamp::now_seconds();
+    }
+
     /// Creator deactivates their prompt (soft delete)
     public entry fun deactivate_prompt(
         creator: &signer,

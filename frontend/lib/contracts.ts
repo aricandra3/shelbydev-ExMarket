@@ -179,6 +179,13 @@ export function buildUpdatePricePayload(promptId: string, newPrice: number) {
     ]);
 }
 
+export function buildUpdateBlobIdPayload(promptId: string, newBlobId: string) {
+    return buildEntryPayload(`${MODULES.PROMPT_REGISTRY}::update_blob_id`, [
+        promptId,
+        newBlobId,
+    ]);
+}
+
 export function buildConsumeApiCallPayload(promptId: string) {
     return buildEntryPayload(`${MODULES.ACCESS_CONTROL}::consume_api_call`, [
         promptId,

@@ -1,23 +1,23 @@
 /// Create Page — Upload prompt to Shelby + register on-chain
+/// ACE encryption applied before upload so only verified buyers can read content.
 
 "use client";
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useWallet } from "@aptos-labs/wallet-adapter-react";
-import { useShelbyBlob } from "@/hooks/useShelbyBlob";
 import { aptosClient } from "@/lib/aptos";
-import { buildRegisterPromptPayload } from "@/lib/contracts";
+import { buildRegisterPromptPayload, buildUpdateBlobIdPayload, getCreatorPrompts } from "@/lib/contracts";
 import { aptToOctas, PROMPT_CATEGORIES } from "@/lib/constants";
 import { PRICING_MODEL_REVERSE } from "@/types";
 import type { PricingModel } from "@/types";
 import { AccountAddress } from "@aptos-labs/ts-sdk";
 import { motion, AnimatePresence } from "framer-motion";
+import { aceEncrypt } from "@/lib/ace";
 
 export default function CreatePage() {
     const router = useRouter();
     const { account, connected, signAndSubmitTransaction } = useWallet();
-    const { uploadToRpc, uploading } = useShelbyBlob();
 
     const [form, setForm] = useState({
         title: "",
@@ -40,52 +40,8 @@ export default function CreatePage() {
         if (!connected || !account) return;
 
         try {
-            // STEP 1: Generate Blob Commitments for Shelby L1
-            setStep("uploading");
-
-            const contentBytes = new TextEncoder().encode(form.content);
-            const blobName = `prompt_${Date.now()}.txt`;
-
-            // Initialize provider and get commitments using the default erasure coding config
-            const { createDefaultErasureCodingProvider, generateCommitments, ShelbyBlobClient, defaultErasureCodingConfig, expectedTotalChunksets } = await import("@/lib/shelby");
-            const erasureCodingConfig = defaultErasureCodingConfig();
-            const provider = await createDefaultErasureCodingProvider();
-            const commitments = await generateCommitments(provider, contentBytes);
-
-            // Compute chunkset size and expected number of chunksets matching the SDK's internal logic
-            const chunksetSize = erasureCodingConfig.chunkSizeBytes * erasureCodingConfig.erasure_k;
-            const numChunksets = expectedTotalChunksets(contentBytes.length, chunksetSize);
-
-            // STEP 2: Register Blob on Shelby L1 Network
             setStep("registering");
 
-            const shelbyPayload = ShelbyBlobClient.createRegisterBlobPayload({
-                account: AccountAddress.fromString(account.address.toString()),
-                blobName,
-                blobSize: contentBytes.length,
-                blobMerkleRoot: commitments.blob_merkle_root,
-                expirationMicros: Date.now() * 1000 + 31536000000000, // 1 year expiration
-                numChunksets,
-                encoding: erasureCodingConfig.enumIndex
-            });
-
-            const shelbyResponse = await signAndSubmitTransaction({ data: shelbyPayload });
-            await aptosClient.waitForTransaction({
-                transactionHash: shelbyResponse.hash,
-                options: { checkSuccess: true, waitForIndexer: true } as any
-            });
-
-            console.log("Waiting for Shelby indexer to sync...");
-            await new Promise(resolve => setTimeout(resolve, 3000));
-
-            // STEP 3: Now that it's on L1, upload the blob content to RPC
-            setStep("uploading"); // Reusing step to show it's pushing to the server now
-
-            const blobId = await uploadToRpc(form.content, account.address.toString(), blobName);
-            if (!blobId) throw new Error("Failed to upload via RPC");
-
-            // STEP 4: Register the prompt metadata on ExMarket contract
-            setStep("registering"); // Now registering into our own app contract
             const tags = form.tags
                 .split(",")
                 .map((t) => t.trim())
@@ -94,8 +50,13 @@ export default function CreatePage() {
             const priceInOctas = aptToOctas(parseFloat(form.price));
             const pricingModelNum = PRICING_MODEL_REVERSE[form.pricingModel];
 
+            // ─── PHASE 1: Register on-chain with placeholder blob_id ──────────
+            // We need the real on-chain prompt_id (Aptos Object address) BEFORE
+            // we can ACE-encrypt — ACE domain = SHA3(prompt_id hex), and
+            // check_permission validates access_control::has_access(user, prompt_id).
+            const placeholderBlobId = "pending";
             const payload = buildRegisterPromptPayload(
-                blobId,
+                placeholderBlobId,
                 form.title,
                 form.description,
                 form.category,
@@ -104,12 +65,90 @@ export default function CreatePage() {
                 priceInOctas
             );
 
-            const response = await signAndSubmitTransaction({ data: payload });
+            const registerResponse = await signAndSubmitTransaction({ data: payload });
             await aptosClient.waitForTransaction({
-                transactionHash: response.hash,
+                transactionHash: registerResponse.hash,
+                options: { checkSuccess: true } as any,
             });
 
-            setTxHash(response.hash);
+            // Fetch the real prompt_id: it's the last address in creator's prompts list
+            const creatorPrompts = await getCreatorPrompts(account.address.toString());
+            if (!creatorPrompts || creatorPrompts.length === 0) {
+                throw new Error("Could not retrieve prompt_id after on-chain registration");
+            }
+            const promptId = creatorPrompts[creatorPrompts.length - 1];
+
+            // ─── PHASE 2: ACE-encrypt with the REAL on-chain prompt_id ────────
+            // Now the domain encodes the actual Object address, so ACE workers
+            // can call has_access(buyer_address, prompt_id) and get the correct result.
+            setStep("uploading");
+
+            const blobName = `prompt_${Date.now()}.txt`;
+            const { ciphertextHex, domainHex } = await aceEncrypt(form.content, promptId);
+            const encryptedPayload = JSON.stringify({ ciphertextHex, domainHex });
+            const uploadBytes = new TextEncoder().encode(encryptedPayload);
+
+            // ─── PHASE 3: Generate Shelby commitments from encrypted bytes ────
+            const {
+                createDefaultErasureCodingProvider,
+                generateCommitments,
+                ShelbyBlobClient,
+                defaultErasureCodingConfig,
+                expectedTotalChunksets,
+                shelbyService,
+            } = await import("@/lib/shelby");
+
+            const erasureCodingConfig = defaultErasureCodingConfig();
+            const provider = await createDefaultErasureCodingProvider();
+            const commitments = await generateCommitments(provider, uploadBytes);
+
+            const chunksetSize = erasureCodingConfig.chunkSizeBytes * erasureCodingConfig.erasure_k;
+            const numChunksets = expectedTotalChunksets(uploadBytes.length, chunksetSize);
+
+            // ─── PHASE 4: Register blob on Shelby L1 ─────────────────────────
+            setStep("registering");
+
+            const shelbyPayload = ShelbyBlobClient.createRegisterBlobPayload({
+                account: AccountAddress.fromString(account.address.toString()),
+                blobName,
+                blobSize: uploadBytes.length,
+                blobMerkleRoot: commitments.blob_merkle_root,
+                expirationMicros: Date.now() * 1000 + 31536000000000,
+                numChunksets,
+                encoding: erasureCodingConfig.enumIndex,
+            });
+
+            const shelbyResponse = await signAndSubmitTransaction({ data: shelbyPayload });
+            await aptosClient.waitForTransaction({
+                transactionHash: shelbyResponse.hash,
+                options: { checkSuccess: true, waitForIndexer: true } as any,
+            });
+
+            console.log("Waiting for Shelby indexer to sync...");
+            await new Promise((resolve) => setTimeout(resolve, 3000));
+
+            // ─── PHASE 5: Upload encrypted blob via Shelby RPC ───────────────
+            setStep("uploading");
+
+            await shelbyService.putEncryptedBlob(
+                ciphertextHex,
+                domainHex,
+                account.address.toString(),
+                blobName
+            );
+            const blobId = `${account.address.toString()}/${blobName}`;
+            if (!blobId) throw new Error("Failed to upload encrypted blob");
+
+            // ─── PHASE 6: Update blob_id on-chain (replace "pending") ─────────
+            setStep("registering");
+
+            const updatePayload = buildUpdateBlobIdPayload(promptId, blobId);
+            const updateResponse = await signAndSubmitTransaction({ data: updatePayload });
+            await aptosClient.waitForTransaction({
+                transactionHash: updateResponse.hash,
+            });
+
+            setTxHash(updateResponse.hash);
             setStep("success");
         } catch (err: any) {
             console.error(err);
