@@ -53,7 +53,7 @@ export const MODULES = {
 
 // ── API Keys ────────────────────────────────────
 export const APTOS_API_KEY = process.env.NEXT_PUBLIC_APTOS_API_KEY || "";
-export const SHELBY_API_KEY = process.env.SHELBY_API_KEY || "";
+export const SHELBY_API_KEY = process.env.NEXT_PUBLIC_SHELBY_API_KEY || "";
 
 // ── Platform ────────────────────────────────────
 export const PLATFORM_NAME = "ExMarket";

@@ -10,3 +10,6 @@ contracts/build/
 # Windows
 Thumbs.db
 
+# Editor settings
+.vscode/
+
