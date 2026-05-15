@@ -14,6 +14,10 @@ import { formatApt } from "@/lib/constants";
 import { truncateAddress, timeAgo, copyToClipboard } from "@/lib/utils";
 import type { PromptMetadata } from "@/types";
 import { aceDecrypt, getSigningMessage } from "@/lib/ace";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { CheckCircle2, Clipboard, LockKeyhole, Wallet } from "lucide-react";
 
 export default function PromptDetailPage() {
     const params = useParams();
@@ -118,56 +122,56 @@ export default function PromptDetailPage() {
 
     if (loading) {
         return (
-            <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-                <div className="glass-card p-8">
+            <div className="mx-auto max-w-4xl px-4 py-12 sm:px-6 lg:px-8">
+                <Card className="p-8">
                     <div className="skeleton h-8 w-2/3 mb-4" />
                     <div className="skeleton h-4 w-full mb-2" />
                     <div className="skeleton h-4 w-3/4 mb-6" />
                     <div className="skeleton h-12 w-40" />
-                </div>
+                </Card>
             </div>
         );
     }
 
     if (!prompt) {
         return (
-            <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-                <div className="glass-card p-12 text-center">
-                    <p className="text-white/40">Prompt not found.</p>
-                </div>
+            <div className="mx-auto max-w-4xl px-4 py-12 sm:px-6 lg:px-8">
+                <Card className="p-12 text-center">
+                    <p className="font-semibold text-cream/50">Prompt not found.</p>
+                </Card>
             </div>
         );
     }
 
     return (
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+        <div className="mx-auto max-w-4xl px-4 py-12 sm:px-6 lg:px-8">
             <div className="grid gap-6">
                 {/* Header Card */}
-                <div className="glass-card p-8">
+                <Card className="p-8">
                     <div className="flex items-start justify-between mb-4">
-                        <div className="badge-primary">{prompt.category}</div>
+                        <Badge>{prompt.category}</Badge>
                         <div className="text-right">
-                            <div className="text-2xl font-bold text-primary-400">
+                            <div className="text-3xl font-black text-retro-yellow">
                                 {formatApt(prompt.price)}
                             </div>
-                            <div className="text-xs text-white/30 capitalize">
+                            <div className="text-xs font-black uppercase tracking-wide text-cream/40">
                                 {prompt.pricingModel.replace(/-/g, " ")}
                             </div>
                         </div>
                     </div>
 
-                    <h1 className="text-3xl font-bold text-white mb-3">
+                    <h1 className="mb-3 font-display text-4xl font-black text-cream">
                         {prompt.title}
                     </h1>
-                    <p className="text-white/50 leading-relaxed mb-6">
+                    <p className="mb-6 font-semibold leading-relaxed text-cream/60">
                         {prompt.description}
                     </p>
 
                     {/* Creator + stats row */}
-                    <div className="flex flex-wrap items-center gap-4 text-sm text-white/30">
+                    <div className="flex flex-wrap items-center gap-4 text-sm font-semibold text-cream/40">
                         <span>
                             by{" "}
-                            <span className="text-white/60 font-mono">
+                            <span className="font-mono text-cream/70">
                                 {truncateAddress(prompt.creator)}
                             </span>
                         </span>
@@ -176,13 +180,14 @@ export default function PromptDetailPage() {
                         <span>•</span>
                         <span>{formatApt(prompt.totalRevenue)} earned</span>
                     </div>
-                </div>
+                </Card>
 
                 {/* Action Card */}
-                <div className="glass-card p-8">
+                <Card className="p-8">
                     {!connected ? (
                         <div className="text-center py-4">
-                            <p className="text-white/40 mb-4">
+                            <Wallet className="mx-auto mb-4 h-10 w-10 text-retro-yellow" />
+                            <p className="mb-4 font-semibold text-cream/50">
                                 Connect your wallet to unlock this prompt
                             </p>
                         </div>
@@ -192,30 +197,29 @@ export default function PromptDetailPage() {
                         /* ── User has access: show content ── */
                         <div>
                             <div className="flex items-center justify-between mb-4">
-                                <h2 className="text-lg font-semibold text-white flex items-center gap-2">
-                                    <span className="w-2 h-2 rounded-full bg-accent-green" />
+                                <h2 className="flex items-center gap-2 text-lg font-black text-cream">
+                                    <CheckCircle2 className="h-5 w-5 text-accent-green" />
                                     Unlocked
                                 </h2>
-                                <button onClick={handleCopy} className="btn-ghost text-xs">
+                                <Button onClick={handleCopy} variant="ghost" size="sm">
+                                    <Clipboard className="h-4 w-4" />
                                     {copied ? "Copied ✓" : "Copy"}
-                                </button>
+                                </Button>
                             </div>
 
                             {decrypting ? (
                                 <div className="space-y-3">
                                     <div className="skeleton h-40 w-full rounded-xl" />
-                                    <p className="text-xs text-white/30 text-center">
+                                    <p className="text-center text-xs font-semibold text-cream/40">
                                         ACE workers verifying on-chain access...
                                     </p>
                                 </div>
                             ) : content ? (
-                                <div className="bg-surface-1 rounded-xl p-6 font-mono text-sm
-                                text-white/80 whitespace-pre-wrap max-h-[500px]
-                                overflow-y-auto border border-white/[0.04]">
+                                <div className="max-h-[500px] overflow-y-auto whitespace-pre-wrap rounded-[8px] border-2 border-ink bg-surface-1/75 p-6 font-mono text-sm text-cream/80 shadow-neo-dark backdrop-blur-xl">
                                     {content}
                                 </div>
                             ) : (
-                                <p className="text-white/40 text-sm">
+                                <p className="text-sm font-semibold text-cream/50">
                                     Loading content from Shelby...
                                 </p>
                             )}
@@ -223,18 +227,19 @@ export default function PromptDetailPage() {
                     ) : (
                         /* ── User needs to unlock ── */
                         <div className="text-center py-4">
-                            <p className="text-white/50 mb-6">
+                            <LockKeyhole className="mx-auto mb-4 h-11 w-11 text-retro-coral" />
+                            <p className="mb-6 font-semibold text-cream/60">
                                 Unlock this prompt to view the full content
                             </p>
 
-                            <button
+                            <Button
                                 onClick={handleUnlock}
                                 disabled={
                                     txState.status === "signing" ||
                                     txState.status === "submitting" ||
                                     txState.status === "confirming"
                                 }
-                                className="btn-primary text-base px-10 py-4"
+                                size="lg"
                             >
                                 {txState.status === "idle" && `Unlock for ${formatApt(prompt.price)}`}
                                 {txState.status === "signing" && "Waiting for signature..."}
@@ -242,20 +247,20 @@ export default function PromptDetailPage() {
                                 {txState.status === "confirming" && "Confirming..."}
                                 {txState.status === "success" && "Unlocked ✓"}
                                 {txState.status === "error" && "Try Again"}
-                            </button>
+                            </Button>
 
                             {txState.error && (
-                                <p className="text-accent-red text-xs mt-3">
+                                <p className="mt-3 text-xs font-semibold text-accent-red">
                                     {txState.error}
                                 </p>
                             )}
 
-                            <p className="text-xs text-white/20 mt-4">
+                            <p className="mt-4 text-xs font-semibold text-cream/35">
                                 {90}% goes to the creator • {10}% platform fee
                             </p>
                         </div>
                     )}
-                </div>
+                </Card>
             </div>
         </div>
     );

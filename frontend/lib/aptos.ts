@@ -23,19 +23,106 @@ const config = new AptosConfig({
 
 export const aptosClient = new Aptos(config);
 
+const VIEW_CACHE_TTL_MS = 30_000;
+const MAX_CONCURRENT_VIEW_CALLS = 2;
+const viewCache = new Map<string, { value: unknown; timestamp: number }>();
+const viewInFlight = new Map<string, Promise<unknown>>();
+let activeViewCalls = 0;
+const viewQueue: Array<() => void> = [];
+
+function shouldCacheView(functionName: string) {
+    return functionName.includes("::prompt_registry::");
+}
+
+function getViewCacheKey(functionName: string, args: any[], typeArgs: string[]) {
+    return JSON.stringify({ functionName, args, typeArgs });
+}
+
+function sleep(ms: number) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function runLimitedView<T>(task: () => Promise<T>): Promise<T> {
+    if (activeViewCalls >= MAX_CONCURRENT_VIEW_CALLS) {
+        await new Promise<void>((resolve) => viewQueue.push(resolve));
+    }
+
+    activeViewCalls += 1;
+    try {
+        return await task();
+    } finally {
+        activeViewCalls -= 1;
+        viewQueue.shift()?.();
+    }
+}
+
+async function retryView<T>(task: () => Promise<T>, retries = 2): Promise<T> {
+    for (let attempt = 0; attempt <= retries; attempt += 1) {
+        try {
+            return await task();
+        } catch (error: any) {
+            const message = String(error?.message || error || "");
+            const isRateLimited =
+                message.includes("429") ||
+                message.toLowerCase().includes("too many requests");
+
+            if (!isRateLimited || attempt === retries) {
+                throw error;
+            }
+
+            await sleep(700 * (attempt + 1));
+        }
+    }
+
+    throw new Error("View function retry failed");
+}
+
 // ── View Function Helper ────────────────────────
 export async function viewFunction<T>(
     functionName: string,
     args: any[] = [],
     typeArgs: string[] = []
 ): Promise<T> {
-    const result = await aptosClient.view({
-        payload: {
-            function: functionName as `${string}::${string}::${string}`,
-            functionArguments: args,
-            typeArguments: typeArgs,
-        },
+    const cacheable = shouldCacheView(functionName);
+    const cacheKey = getViewCacheKey(functionName, args, typeArgs);
+    const cached = viewCache.get(cacheKey);
+
+    if (
+        cacheable &&
+        cached &&
+        Date.now() - cached.timestamp < VIEW_CACHE_TTL_MS
+    ) {
+        return cached.value as T;
+    }
+
+    if (cacheable && viewInFlight.has(cacheKey)) {
+        return (await viewInFlight.get(cacheKey)) as T;
+    }
+
+    const promise = runLimitedView(() =>
+        retryView(() =>
+            aptosClient.view({
+                payload: {
+                    function: functionName as `${string}::${string}::${string}`,
+                    functionArguments: args,
+                    typeArguments: typeArgs,
+                },
+            })
+        )
+    );
+
+    if (cacheable) {
+        viewInFlight.set(cacheKey, promise);
+    }
+
+    const result = await promise.finally(() => {
+        if (cacheable) viewInFlight.delete(cacheKey);
     });
+
+    if (cacheable) {
+        viewCache.set(cacheKey, { value: result, timestamp: Date.now() });
+    }
+
     return result as T;
 }
 

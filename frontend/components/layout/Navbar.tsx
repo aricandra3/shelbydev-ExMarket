@@ -7,12 +7,13 @@ import { usePathname } from "next/navigation";
 import { useWallet } from "@aptos-labs/wallet-adapter-react";
 import { ConnectButton } from "@/components/wallet/ConnectButton";
 import { cn } from "@/lib/utils";
+import { LayoutDashboard, Library, Search, Upload } from "lucide-react";
 
 const NAV_LINKS = [
-    { href: "/explore", label: "Marketplace" },
-    { href: "/create", label: "Upload" },
-    { href: "/library", label: "Library" },
-    { href: "/dashboard", label: "Dashboard" },
+    { href: "/explore", label: "Market", icon: Search },
+    { href: "/create", label: "Upload", icon: Upload },
+    { href: "/library", label: "Library", icon: Library },
+    { href: "/dashboard", label: "Dash", icon: LayoutDashboard },
 ];
 
 export function Navbar() {
@@ -20,27 +21,21 @@ export function Navbar() {
     const { connected } = useWallet();
 
     return (
-        <nav className="absolute top-0 w-full z-50 pt-8 pb-4">
-            <div className="max-w-[1400px] mx-auto px-6 lg:px-12">
-                <div className="flex items-center justify-between">
+        <nav className="sticky top-0 z-50 px-4 py-4">
+            <div className="mx-auto max-w-[1400px]">
+                <div className="glass-card flex items-center justify-between px-4 py-3 md:px-5">
 
-                    {/* Logo — mark + wordmark */}
-                    <Link href="/" className="flex items-center gap-2.5 group">
-                        {/* Brand mark: small rounded square with gradient */}
-                        <span
-                            className="w-6 h-6 rounded-[5px] flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0"
-                            style={{ background: "linear-gradient(135deg, #7c3aed, #d946ef)" }}
-                        >
+                    <Link href="/" className="group flex items-center gap-2.5">
+                        <span className="flex h-8 w-8 flex-shrink-0 rotate-[-3deg] items-center justify-center rounded-[6px] border-2 border-ink bg-retro-yellow text-sm font-black text-ink shadow-neo-sm transition-transform group-hover:rotate-3">
                             E
                         </span>
-                        <span className="text-[12px] font-semibold font-display text-white tracking-tight">
+                        <span className="font-display text-sm font-black uppercase tracking-wide text-cream">
                             ExMarket
                         </span>
                     </Link>
 
-                    {/* Nav Links + Wallet */}
-                    <div className="flex items-center gap-5">
-                        <div className="hidden md:flex items-center gap-5 mr-2">
+                    <div className="flex items-center gap-3">
+                        <div className="hidden items-center gap-1 md:flex">
                             {NAV_LINKS.map((link) => {
                                 if (
                                     !connected &&
@@ -50,17 +45,19 @@ export function Navbar() {
                                 }
 
                                 const isActive = pathname === link.href;
+                                const Icon = link.icon;
                                 return (
                                     <Link
                                         key={link.href}
                                         href={link.href}
                                         className={cn(
-                                            "text-[12px] font-medium tracking-wide transition-colors",
+                                            "inline-flex items-center gap-1.5 rounded-[6px] border-2 px-3 py-2 text-[11px] font-black uppercase tracking-wide transition-all",
                                             isActive
-                                                ? "text-white"
-                                                : "text-white/35 hover:text-white/80"
+                                                ? "border-ink bg-retro-cyan text-ink shadow-neo-sm"
+                                                : "border-transparent text-cream/55 hover:border-cream/60 hover:bg-cream/10 hover:text-cream"
                                         )}
                                     >
+                                        <Icon className="h-3.5 w-3.5" />
                                         {link.label}
                                     </Link>
                                 );

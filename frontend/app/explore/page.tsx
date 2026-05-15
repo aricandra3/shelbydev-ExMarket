@@ -9,6 +9,10 @@ import { PROMPT_CATEGORIES } from "@/types";
 import { formatApt } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
+import { Badge } from "@/components/ui/badge";
+import { buttonVariants } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { ArrowRight, Search } from "lucide-react";
 
 export default function ExplorePage() {
     const [selectedCategory, setSelectedCategory] = useState<string | undefined>(
@@ -17,13 +21,17 @@ export default function ExplorePage() {
     const { prompts, loading, error } = usePromptRegistry(selectedCategory);
 
     return (
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+        <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
             {/* Header */}
             <div className="mb-8">
-                <h1 className="text-4xl md:text-5xl font-display font-extrabold tracking-tight text-white mb-4">
+                <Badge variant="warning" className="mb-4 shadow-neo-sm">
+                    <Search className="h-3.5 w-3.5" />
+                    Marketplace
+                </Badge>
+                <h1 className="section-title">
                     Explore Prompts
                 </h1>
-                <p className="text-lg text-white/50">
+                <p className="section-subtitle">
                     Discover premium AI prompts from top creators
                 </p>
             </div>
@@ -35,8 +43,8 @@ export default function ExplorePage() {
                     className={cn(
                         "px-4 py-2 rounded-lg text-sm font-medium transition-all",
                         !selectedCategory
-                            ? "bg-primary-500/15 text-primary-400 border border-primary-500/30"
-                            : "text-white/40 hover:text-white/60 hover:bg-white/[0.04]"
+                            ? "border-2 border-ink bg-retro-yellow text-ink shadow-neo-sm"
+                            : "border-2 border-transparent bg-cream/[0.04] text-cream/45 hover:border-cream/50 hover:text-cream"
                     )}
                 >
                     All
@@ -46,13 +54,13 @@ export default function ExplorePage() {
                         key={cat}
                         onClick={() => setSelectedCategory(cat)}
                         className={cn(
-                            "px-4 py-2 rounded-lg text-sm font-medium transition-all",
-                            selectedCategory === cat
-                                ? "bg-primary-500/15 text-primary-400 border border-primary-500/30"
-                                : "text-white/40 hover:text-white/60 hover:bg-white/[0.04]"
-                        )}
-                    >
-                        {cat}
+                        "px-4 py-2 rounded-lg text-sm font-medium transition-all",
+                        selectedCategory === cat
+                            ? "border-2 border-ink bg-retro-cyan text-ink shadow-neo-sm"
+                            : "border-2 border-transparent bg-cream/[0.04] text-cream/45 hover:border-cream/50 hover:text-cream"
+                    )}
+                >
+                    {cat}
                     </button>
                 ))}
             </div>
@@ -66,41 +74,42 @@ export default function ExplorePage() {
                             initial={{ opacity: 0, y: 20 }}
                             animate={{ opacity: 1, y: 0 }}
                             transition={{ delay: i * 0.1, duration: 0.5 }}
-                            className="glass-card p-6 h-[250px] flex flex-col justify-between animate-pulse"
                         >
-                            <div className="flex justify-between items-start">
-                                <div className="h-6 w-20 bg-surface-3 rounded-md"></div>
-                                <div className="h-6 w-16 bg-surface-3 rounded-md"></div>
-                            </div>
-                            <div className="space-y-3 mt-4">
-                                <div className="h-6 w-11/12 bg-surface-3 rounded-md"></div>
-                                <div className="h-4 w-full bg-surface-3 rounded-md"></div>
-                                <div className="h-4 w-4/5 bg-surface-3 rounded-md"></div>
-                            </div>
-                            <div className="mt-auto pt-6 flex justify-between items-center border-t border-white/[0.04]">
-                                <div className="h-4 w-24 bg-surface-3 rounded-md"></div>
-                            </div>
+                            <Card className="flex h-[250px] animate-pulse flex-col justify-between p-6">
+                                <div className="flex items-start justify-between">
+                                    <div className="skeleton h-6 w-20"></div>
+                                    <div className="skeleton h-6 w-16"></div>
+                                </div>
+                                <div className="mt-4 space-y-3">
+                                    <div className="skeleton h-6 w-11/12"></div>
+                                    <div className="skeleton h-4 w-full"></div>
+                                    <div className="skeleton h-4 w-4/5"></div>
+                                </div>
+                                <div className="mt-auto flex items-center justify-between border-t border-cream/10 pt-6">
+                                    <div className="skeleton h-4 w-24"></div>
+                                </div>
+                            </Card>
                         </motion.div>
                     ))}
                 </div>
             ) : error ? (
-                <div className="glass-card p-8 text-center">
-                    <p className="text-accent-red text-sm">{error}</p>
-                </div>
+                <Card className="p-8 text-center">
+                    <p className="text-sm font-semibold text-accent-red">{error}</p>
+                </Card>
             ) : null}
 
             {/* Prompt Grid */}
             {!loading && !error && (
                 <>
                     {prompts.length === 0 ? (
-                        <div className="glass-card p-12 text-center">
-                            <p className="text-white/40 text-sm">
+                        <Card className="p-12 text-center">
+                            <p className="text-sm font-semibold text-cream/50">
                                 No prompts found. Be the first to create one!
                             </p>
-                            <Link href="/create" className="btn-primary mt-4 inline-block">
+                            <Link href="/create" className={buttonVariants({ className: "mt-5" })}>
                                 Create Prompt
                             </Link>
-                        </div>
+                        </Card>
                     ) : (
                         <motion.div
                             initial={{ opacity: 0 }}
@@ -116,30 +125,31 @@ export default function ExplorePage() {
                                 >
                                     <Link
                                         href={`/prompt/${prompt.promptId}`}
-                                        className="glass-card-hover holographic-hover p-6 block h-full flex flex-col"
+                                        className="glass-card-hover holographic-hover flex h-full flex-col p-6"
                                     >
                                         <div className="flex-1">
                                             {/* Category badge */}
-                                            <div className="badge-primary mb-3">{prompt.category}</div>
+                                            <Badge className="mb-3">{prompt.category}</Badge>
 
                                             {/* Title */}
-                                            <h3 className="text-lg font-semibold text-white mb-2 line-clamp-2">
+                                            <h3 className="mb-2 font-display text-xl font-black text-cream line-clamp-2">
                                                 {prompt.title}
                                             </h3>
 
                                             {/* Description */}
-                                            <p className="text-sm text-white/40 mb-4 line-clamp-2">
+                                            <p className="mb-4 text-sm font-semibold leading-relaxed text-cream/55 line-clamp-2">
                                                 {prompt.description}
                                             </p>
                                         </div>
 
                                         {/* Bottom row */}
-                                        <div className="flex items-center justify-between mt-auto pt-4 border-t border-white/[0.04]">
-                                            <span className="text-sm font-bold text-primary-400">
+                                        <div className="mt-auto flex items-center justify-between border-t border-cream/10 pt-4">
+                                            <span className="text-sm font-black text-retro-yellow">
                                                 {formatApt(prompt.price)}
                                             </span>
-                                            <span className="text-xs font-medium text-white/30 bg-surface-3 px-2 py-1 rounded-md">
+                                            <span className="inline-flex items-center gap-1 rounded-[5px] border border-cream/20 bg-cream/[0.08] px-2 py-1 text-xs font-black uppercase text-cream/45">
                                                 {prompt.totalUnlocks} unlocks
+                                                <ArrowRight className="h-3 w-3" />
                                             </span>
                                         </div>
                                     </Link>

@@ -6,6 +6,11 @@ import Link from "next/link";
 import { useWallet } from "@aptos-labs/wallet-adapter-react";
 import { motion } from "framer-motion";
 import type { Variants } from "framer-motion";
+import { ArrowRight, Coins, Cuboid, ShieldCheck, Sparkles, UploadCloud } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { buttonVariants } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Separator } from "@/components/ui/separator";
 
 // ── Animation ─────────────────────────────────────────────
 const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
@@ -23,38 +28,23 @@ const rise: Variants = {
 // ── Data ──────────────────────────────────────────────────
 const STATS = [
     { value: "2,400+", label: "Prompts listed" },
-    { value: "180+",   label: "Creators" },
-    { value: "Aptos",  label: "Chain" },
+    { value: "180+", label: "Creators" },
+    { value: "Aptos", label: "Chain" },
 ];
 
 const FEATURES = [
     {
-        icon: (
-            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <rect x="3" y="3" width="14" height="14" rx="2" />
-                <path d="M7 10h6M10 7v6" />
-            </svg>
-        ),
+        icon: UploadCloud,
         title: "Publish anything",
-        body: "Midjourney styles, ChatGPT templates, agent workflows — if it's a prompt, ExMarket can list it.",
+        body: "Midjourney styles, ChatGPT templates, and agent workflows can live in one on-chain shelf.",
     },
     {
-        icon: (
-            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <path d="M10 2L3 7v6l7 5 7-5V7l-7-5z" />
-                <path d="M10 2v15M3 7l7 5 7-5" />
-            </svg>
-        ),
+        icon: ShieldCheck,
         title: "On-chain ownership",
-        body: "Every listing is stored via the Shelby protocol. Your content, your keys, your permanent record.",
+        body: "Listings keep a permanent record through Shelby and Aptos without hiding the creator trail.",
     },
     {
-        icon: (
-            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <circle cx="10" cy="10" r="7" />
-                <path d="M10 6v4l3 2" />
-            </svg>
-        ),
+        icon: Coins,
         title: "Instant payouts",
         body: "Royalties settle in seconds, not days. No intermediary holds your revenue.",
     },
@@ -67,126 +57,134 @@ export default function HomePage() {
     return (
         <div className="flex flex-col">
 
-            {/* ── Hero ──────────────────────────────────────────────── */}
-            <section className="relative min-h-[92vh] flex flex-col items-center justify-center text-center px-6 overflow-hidden">
+            <section className="relative overflow-hidden px-4 pb-14 pt-8 md:px-6 md:pb-20 md:pt-10">
+                <div aria-hidden className="absolute inset-x-0 top-16 h-16 -rotate-2 border-y-2 border-ink bg-retro-coral/80" />
+                <div aria-hidden className="absolute bottom-12 left-0 h-14 w-2/5 rotate-2 border-y-2 border-r-2 border-ink bg-retro-cyan/70" />
+                <div aria-hidden className="halftone absolute right-4 top-28 h-40 w-40 opacity-50" />
 
-                {/* Dot grid — original brand texture */}
-                <div
-                    aria-hidden
-                    className="pointer-events-none absolute inset-0 z-0 opacity-[0.18]"
-                    style={{
-                        backgroundImage:
-                            "radial-gradient(circle, rgba(139,92,246,0.6) 1px, transparent 1px)",
-                        backgroundSize: "32px 32px",
-                        maskImage:
-                            "radial-gradient(ellipse 80% 80% at 50% 50%, black 30%, transparent 100%)",
-                        WebkitMaskImage:
-                            "radial-gradient(ellipse 80% 80% at 50% 50%, black 30%, transparent 100%)",
-                    }}
-                />
-
-                {/* Core glow */}
-                <div
-                    aria-hidden
-                    className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] rounded-full z-0"
-                    style={{
-                        background:
-                            "radial-gradient(circle, rgba(124,58,237,0.12) 0%, transparent 70%)",
-                    }}
-                />
-
-                {/* Content */}
                 <motion.div
-                    className="relative z-10 flex flex-col items-center max-w-2xl mx-auto"
+                    className="relative z-10 mx-auto grid min-h-[70vh] max-w-7xl items-center gap-10 lg:grid-cols-2"
                     variants={stagger}
                     initial="hidden"
                     animate="show"
                 >
-                    {/* Pill badge */}
-                    <motion.div variants={rise} className="mb-7">
-                        <span className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full text-[11px] font-medium tracking-wide text-primary-300 bg-primary-950/80 border border-primary-800/50 backdrop-blur-sm">
-                            <span className="w-1.5 h-1.5 rounded-full bg-primary-400 animate-pulse" />
-                            Shelby Protocol · Aptos Network
-                        </span>
-                    </motion.div>
+                    <div>
+                        <motion.div variants={rise} className="mb-6">
+                            <Badge variant="warning" className="shadow-neo-sm">
+                                <Sparkles className="h-3.5 w-3.5" />
+                                Shelby Protocol / Aptos
+                            </Badge>
+                        </motion.div>
 
-                    {/* H1 */}
-                    <motion.h1
-                        variants={rise}
-                        className="text-[2.75rem] sm:text-[3.5rem] lg:text-[4.25rem] font-bold leading-[1.08] tracking-tight text-white mb-5"
-                    >
-                        The marketplace for{" "}
-                        <br className="hidden sm:block" />
-                        <span className="text-gradient">AI prompt creators.</span>
-                    </motion.h1>
-
-                    {/* Sub */}
-                    <motion.p
-                        variants={rise}
-                        className="text-base sm:text-lg text-white/40 max-w-md leading-relaxed mb-9"
-                    >
-                        Upload your work. Set a price. Earn every time someone buys. 
-                        No platform fees holding you back.
-                    </motion.p>
-
-                    {/* CTAs */}
-                    <motion.div
-                        variants={rise}
-                        className="flex items-center gap-3 flex-wrap justify-center mb-12"
-                    >
-                        <Link
-                            href={connected ? "/create" : "/explore"}
-                            className="btn-primary text-sm"
+                        <motion.h1
+                            variants={rise}
+                            className="mb-5 max-w-3xl font-display text-[3.1rem] font-black leading-[0.92] text-cream sm:text-[4.25rem] lg:text-[5rem]"
+                            style={{ textShadow: "5px 5px 0 #111111" }}
                         >
-                            {connected ? "Upload a Prompt" : "Browse Marketplace"}
-                        </Link>
-                        {!connected && (
-                            <Link
-                                href="/create"
-                                className="px-5 py-2.5 text-sm font-medium text-white/50 border border-white/[0.08] rounded-lg hover:text-white hover:border-white/20 transition-colors"
-                            >
-                                Sell your prompts →
-                            </Link>
-                        )}
-                    </motion.div>
+                            ExMarket{" "}
+                            <span className="block text-retro-yellow">Prompt Bazaar</span>
+                        </motion.h1>
 
-                    {/* Stats row */}
+                        <motion.p
+                            variants={rise}
+                            className="mb-6 max-w-xl text-base font-semibold leading-relaxed text-cream/70 sm:text-lg"
+                        >
+                            A retro-frosted marketplace for premium AI prompts, creator workflows,
+                            and unlockable knowledge on-chain.
+                        </motion.p>
+
+                        <motion.div
+                            variants={rise}
+                            className="mb-10 flex flex-wrap items-center gap-3"
+                        >
+                            <Link
+                                href={connected ? "/create" : "/explore"}
+                                className={buttonVariants({ size: "lg" })}
+                            >
+                                {connected ? "Upload Prompt" : "Browse Market"}
+                                <ArrowRight className="h-4 w-4" />
+                            </Link>
+                            {!connected && (
+                                <Link
+                                    href="/create"
+                                    className={buttonVariants({ variant: "outline", size: "lg" })}
+                                >
+                                    Sell Prompts
+                                </Link>
+                            )}
+                        </motion.div>
+
+                        <motion.div
+                            variants={rise}
+                            className="grid max-w-2xl grid-cols-3 overflow-hidden rounded-[8px] border-2 border-ink bg-cream/[0.08] shadow-neo backdrop-blur-xl"
+                        >
+                            {STATS.map((s, index) => (
+                                <div key={s.label} className="p-4">
+                                    <span className="block text-2xl font-black text-retro-yellow tabular-nums">
+                                        {s.value}
+                                    </span>
+                                    <span className="text-[10px] font-black uppercase tracking-widest text-cream/50">
+                                        {s.label}
+                                    </span>
+                                    {index < STATS.length - 1 && (
+                                        <Separator orientation="vertical" className="absolute hidden" />
+                                    )}
+                                </div>
+                            ))}
+                        </motion.div>
+                    </div>
+
                     <motion.div
                         variants={rise}
-                        className="flex items-center gap-8 sm:gap-12 flex-wrap justify-center"
+                        className="absolute right-3 top-24 hidden w-[min(36vw,28rem)] lg:block xl:right-10 xl:top-28"
                     >
-                        {STATS.map((s) => (
-                            <div key={s.label} className="flex flex-col items-center gap-0.5">
-                                <span className="text-lg font-bold text-white tabular-nums">{s.value}</span>
-                                <span className="text-[11px] text-white/30 uppercase tracking-widest">{s.label}</span>
-                            </div>
-                        ))}
+                        <Card className="mx-auto w-full max-w-md rotate-2 bg-cream/[0.1] p-0 transition-transform duration-200 hover:rotate-0">
+                            <CardHeader className="border-b-2 border-ink bg-retro-mint/90 text-ink">
+                                <div className="flex items-center justify-between gap-4">
+                                    <Badge variant="outline" className="border-ink bg-cream text-ink">
+                                        Featured
+                                    </Badge>
+                                    <Cuboid className="h-6 w-6" />
+                                </div>
+                                <CardTitle className="text-ink">
+                                    Agent Workflow Pack
+                                </CardTitle>
+                            </CardHeader>
+                            <CardContent className="space-y-5 p-6">
+                                <div className="rounded-[7px] border-2 border-ink bg-surface-0/55 p-4 font-mono text-xs leading-relaxed text-cream/75 backdrop-blur-xl">
+                                    system: sellable prompt bundle
+                                    <br />
+                                    chain: aptos
+                                    <br />
+                                    access: buyer verified
+                                </div>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div className="rounded-[7px] border-2 border-ink bg-retro-yellow p-4 text-ink shadow-neo-sm">
+                                        <p className="text-[10px] font-black uppercase tracking-widest">Price</p>
+                                        <p className="text-2xl font-black">0.8 APT</p>
+                                    </div>
+                                    <div className="rounded-[7px] border-2 border-ink bg-retro-coral p-4 text-ink shadow-neo-sm">
+                                        <p className="text-[10px] font-black uppercase tracking-widest">Unlocks</p>
+                                        <p className="text-2xl font-black">312</p>
+                                    </div>
+                                </div>
+                            </CardContent>
+                        </Card>
                     </motion.div>
                 </motion.div>
-
-                {/* Bottom fade to section */}
-                <div
-                    aria-hidden
-                    className="pointer-events-none absolute bottom-0 left-0 right-0 h-32 z-10"
-                    style={{
-                        background: "linear-gradient(to bottom, transparent, #09090b)",
-                    }}
-                />
             </section>
 
-            {/* ── Features ──────────────────────────────────────────── */}
-            <section className="relative py-20 px-6">
-                {/* Branded rule */}
-                <div className="max-w-4xl mx-auto mb-16 flex items-center gap-4">
-                    <div className="flex-1 h-px bg-white/5" />
-                    <span className="text-[10px] font-semibold uppercase tracking-[0.3em] text-white/20">
+            <section className="relative px-4 pb-24 md:px-6">
+                <div className="mx-auto mb-12 flex max-w-6xl items-center gap-4">
+                    <Separator className="bg-cream/20" />
+                    <span className="shrink-0 rounded-[5px] border-2 border-ink bg-retro-coral px-3 py-1 text-[10px] font-black uppercase tracking-[0.3em] text-ink shadow-neo-sm">
                         How it works
                     </span>
-                    <div className="flex-1 h-px bg-white/5" />
+                    <Separator className="bg-cream/20" />
                 </div>
 
                 <motion.div
-                    className="max-w-4xl mx-auto grid grid-cols-1 sm:grid-cols-3 gap-px bg-white/5 rounded-2xl overflow-hidden"
+                    className="mx-auto grid max-w-6xl grid-cols-1 gap-5 sm:grid-cols-3"
                     variants={stagger}
                     initial="hidden"
                     whileInView="show"
@@ -196,18 +194,27 @@ export default function HomePage() {
                         <motion.div
                             key={i}
                             variants={rise}
-                            className="flex flex-col gap-4 p-8 bg-surface-1 hover:bg-surface-2 transition-colors group"
                         >
-                            <div className="w-9 h-9 rounded-lg bg-primary-950 border border-primary-900/60 flex items-center justify-center text-primary-400 group-hover:text-primary-300 group-hover:border-primary-800 transition-colors">
-                                {f.icon}
-                            </div>
-                            <div>
-                                <h3 className="text-sm font-semibold text-white mb-1.5">{f.title}</h3>
-                                <p className="text-sm text-white/35 leading-relaxed">{f.body}</p>
-                            </div>
-                            <span className="text-[10px] font-mono text-white/20 mt-auto">
-                                0{i + 1}
-                            </span>
+                            <Card className="group h-full transition-transform duration-200 hover:-translate-x-1 hover:-translate-y-1">
+                                <CardContent className="flex h-full flex-col gap-5 p-6">
+                                    <div className="flex items-start justify-between">
+                                        <div className="flex h-12 w-12 items-center justify-center rounded-[7px] border-2 border-ink bg-retro-yellow text-ink shadow-neo-sm transition-transform group-hover:rotate-3">
+                                            <f.icon className="h-6 w-6" />
+                                        </div>
+                                        <span className="font-mono text-xs font-black text-cream/35">
+                                            0{i + 1}
+                                        </span>
+                                    </div>
+                                    <div>
+                                        <h3 className="mb-2 font-display text-xl font-black text-cream">
+                                            {f.title}
+                                        </h3>
+                                        <p className="text-sm font-semibold leading-relaxed text-cream/55">
+                                            {f.body}
+                                        </p>
+                                    </div>
+                                </CardContent>
+                            </Card>
                         </motion.div>
                     ))}
                 </motion.div>

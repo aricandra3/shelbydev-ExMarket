@@ -14,6 +14,12 @@ import type { PricingModel } from "@/types";
 import { AccountAddress } from "@aptos-labs/ts-sdk";
 import { motion, AnimatePresence } from "framer-motion";
 import { aceEncrypt } from "@/lib/ace";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { CalendarClock, CheckCircle2, Eye, Send, Unlock, Zap } from "lucide-react";
 
 export default function CreatePage() {
     const router = useRouter();
@@ -160,30 +166,37 @@ export default function CreatePage() {
     // Render early exit for disconnected wallet
     if (!connected) {
         return (
-            <div className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+            <div className="mx-auto max-w-2xl px-4 py-16 sm:px-6 lg:px-8">
                 <motion.div
                     initial={{ opacity: 0, scale: 0.95 }}
                     animate={{ opacity: 1, scale: 1 }}
-                    className="glass-card p-12 text-center"
                 >
-                    <h2 className="text-xl font-semibold text-white mb-4">
-                        Connect Your Wallet
-                    </h2>
-                    <p className="text-white/40">
-                        Connect your Aptos wallet to start creating prompts.
-                    </p>
+                    <Card className="p-12 text-center">
+                        <Badge variant="warning" className="mb-5 shadow-neo-sm">
+                            Creator Gate
+                        </Badge>
+                        <h2 className="mb-4 font-display text-3xl font-black text-cream">
+                            Connect Your Wallet
+                        </h2>
+                        <p className="font-semibold text-cream/55">
+                            Connect your Aptos wallet to start creating prompts.
+                        </p>
+                    </Card>
                 </motion.div>
             </div>
         );
     }
 
     return (
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-            <div className="mb-8">
-                <h1 className="text-4xl md:text-5xl font-display font-extrabold tracking-tight text-white mb-4">
+        <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
+            <div className="mb-9">
+                <Badge variant="secondary" className="mb-4 shadow-neo-sm">
+                    New Listing
+                </Badge>
+                <h1 className="section-title">
                     Create Prompt
                 </h1>
-                <p className="text-lg text-white/50">
+                <p className="section-subtitle">
                     List your instructions on the decentralized marketplace
                 </p>
             </div>
@@ -199,26 +212,26 @@ export default function CreatePage() {
                                 animate={{ opacity: 1, scale: 1, y: 0 }}
                                 exit={{ opacity: 0, scale: 0.95, y: -10 }}
                                 transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
-                                className="glass-card p-12 text-center"
                             >
-                                <div className="text-5xl mb-4">🎉</div>
-                                <h2 className="text-2xl font-bold text-white mb-2">
-                                    Prompt Published!
-                                </h2>
-                                <p className="text-white/50 mb-6">
-                                    Your prompt is now live on the marketplace.
-                                </p>
-                                {txHash && (
-                                    <p className="text-xs text-white/30 font-mono mb-6 break-all">
-                                        tx: {txHash}
+                                <Card className="p-12 text-center">
+                                    <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-[8px] border-2 border-ink bg-retro-lime text-ink shadow-neo">
+                                        <CheckCircle2 className="h-9 w-9" />
+                                    </div>
+                                    <h2 className="mb-2 font-display text-3xl font-black text-cream">
+                                        Prompt Published!
+                                    </h2>
+                                    <p className="mb-6 font-semibold text-cream/55">
+                                        Your prompt is now live on the marketplace.
                                     </p>
-                                )}
-                                <button
-                                    onClick={() => router.push("/dashboard")}
-                                    className="btn-primary"
-                                >
-                                    Go to Dashboard
-                                </button>
+                                    {txHash && (
+                                        <p className="mb-6 break-all font-mono text-xs text-cream/35">
+                                            tx: {txHash}
+                                        </p>
+                                    )}
+                                    <Button onClick={() => router.push("/dashboard")}>
+                                        Go to Dashboard
+                                    </Button>
+                                </Card>
                             </motion.div>
                         ) : (
                             <motion.div
@@ -229,16 +242,15 @@ export default function CreatePage() {
                                 transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
                             >
                                 <form onSubmit={handleSubmit} className="space-y-6">
-                                    <div className="glass-card p-8 space-y-5">
+                                    <Card className="space-y-5 p-8">
                                         {/* Title */}
                                         <div>
-                                            <label className="block text-sm font-medium text-white/60 mb-2">
+                                            <label className="mb-2 block text-xs font-black uppercase tracking-widest text-cream/65">
                                                 Title
                                             </label>
-                                            <input
+                                            <Input
                                                 type="text"
                                                 required
-                                                className="input-field"
                                                 placeholder="e.g. Ultimate SEO Blog Post Generator"
                                                 value={form.title}
                                                 onChange={(e) => setForm({ ...form, title: e.target.value })}
@@ -247,13 +259,12 @@ export default function CreatePage() {
 
                                         {/* Description */}
                                         <div>
-                                            <label className="block text-sm font-medium text-white/60 mb-2">
+                                            <label className="mb-2 block text-xs font-black uppercase tracking-widest text-cream/65">
                                                 Description
                                             </label>
-                                            <textarea
+                                            <Textarea
                                                 required
                                                 rows={3}
-                                                className="textarea-field"
                                                 placeholder="Describe what your prompt does and who it's for..."
                                                 value={form.description}
                                                 onChange={(e) =>
@@ -264,7 +275,7 @@ export default function CreatePage() {
 
                                         {/* Category */}
                                         <div>
-                                            <label className="block text-sm font-medium text-white/60 mb-2">
+                                            <label className="mb-2 block text-xs font-black uppercase tracking-widest text-cream/65">
                                                 Category
                                             </label>
                                             <select
@@ -282,12 +293,11 @@ export default function CreatePage() {
 
                                         {/* Tags */}
                                         <div>
-                                            <label className="block text-sm font-medium text-white/60 mb-2">
+                                            <label className="mb-2 block text-xs font-black uppercase tracking-widest text-cream/65">
                                                 Tags (comma-separated)
                                             </label>
-                                            <input
+                                            <Input
                                                 type="text"
-                                                className="input-field"
                                                 placeholder="e.g. seo, blog, marketing"
                                                 value={form.tags}
                                                 onChange={(e) => setForm({ ...form, tags: e.target.value })}
@@ -296,78 +306,82 @@ export default function CreatePage() {
 
                                         {/* Pricing Model */}
                                         <div>
-                                            <label className="block text-sm font-medium text-white/60 mb-2">
+                                            <label className="mb-2 block text-xs font-black uppercase tracking-widest text-cream/65">
                                                 Pricing Model
                                             </label>
                                             <div className="grid grid-cols-3 gap-3">
                                                 {(
                                                     [
-                                                        { key: "pay-per-unlock", label: "Pay-per-Unlock", icon: "🔓" },
-                                                        { key: "subscription", label: "Subscription", icon: "📅" },
-                                                        { key: "api-pay-per-call", label: "API Pay-per-Call", icon: "⚡" },
+                                                        { key: "pay-per-unlock", label: "Pay-per-Unlock", icon: Unlock },
+                                                        { key: "subscription", label: "Subscription", icon: CalendarClock },
+                                                        { key: "api-pay-per-call", label: "API Pay-per-Call", icon: Zap },
                                                     ] as const
-                                                ).map((model) => (
-                                                    <button
-                                                        key={model.key}
-                                                        type="button"
-                                                        onClick={() =>
-                                                            setForm({ ...form, pricingModel: model.key })
-                                                        }
-                                                        className={`p-3 rounded-xl border text-center transition-all text-xs font-medium ${form.pricingModel === model.key
-                                                            ? "border-primary-500/50 bg-primary-500/10 text-primary-400"
-                                                            : "border-white/[0.06] text-white/40 hover:border-white/[0.12]"
-                                                            }`}
-                                                    >
-                                                        <div className="text-lg mb-1">{model.icon}</div>
-                                                        {model.label}
-                                                    </button>
-                                                ))}
+                                                ).map((model) => {
+                                                    const Icon = model.icon;
+                                                    const isActive = form.pricingModel === model.key;
+                                                    return (
+                                                        <button
+                                                            key={model.key}
+                                                            type="button"
+                                                            onClick={() =>
+                                                                setForm({ ...form, pricingModel: model.key })
+                                                            }
+                                                            className={`rounded-[7px] border-2 p-3 text-center text-xs font-black uppercase tracking-wide transition-all ${isActive
+                                                                ? "border-ink bg-retro-cyan text-ink shadow-neo-sm"
+                                                                : "border-cream/20 bg-cream/[0.05] text-cream/45 hover:border-cream/60 hover:text-cream"
+                                                                }`}
+                                                        >
+                                                            <Icon className="mx-auto mb-2 h-5 w-5" />
+                                                            {model.label}
+                                                        </button>
+                                                    );
+                                                })}
                                             </div>
                                         </div>
 
                                         {/* Price */}
                                         <div>
-                                            <label className="block text-sm font-medium text-white/60 mb-2">
+                                            <label className="mb-2 block text-xs font-black uppercase tracking-widest text-cream/65">
                                                 Price (APT)
                                             </label>
-                                            <input
+                                            <Input
                                                 type="number"
                                                 required
                                                 min="0.001"
                                                 step="0.001"
-                                                className="input-field"
                                                 placeholder="0.1"
                                                 value={form.price}
                                                 onChange={(e) => setForm({ ...form, price: e.target.value })}
                                             />
                                         </div>
-                                    </div>
+                                    </Card>
 
                                     {/* Prompt Content */}
-                                    <div className="glass-card p-8">
-                                        <label className="block text-sm font-medium text-white/60 mb-2">
+                                    <Card className="p-8">
+                                        <label className="mb-2 block text-xs font-black uppercase tracking-widest text-cream/65">
                                             Prompt Content
                                         </label>
-                                        <textarea
+                                        <Textarea
                                             required
                                             rows={12}
-                                            className="textarea-field font-mono text-sm"
+                                            className="font-mono text-sm"
                                             placeholder="Paste your full prompt content here. This will be stored on Shelby and only visible to buyers."
                                             value={form.content}
                                             onChange={(e) => setForm({ ...form, content: e.target.value })}
                                         />
-                                        <p className="text-xs text-white/20 mt-2">
+                                        <p className="mt-3 text-xs font-semibold text-cream/35">
                                             This content is stored on Shelby decentralized storage. It will only
                                             be accessible to users who pay to unlock it.
                                         </p>
-                                    </div>
+                                    </Card>
 
                                     {/* Submit */}
-                                    <button
+                                    <Button
                                         type="submit"
                                         disabled={step === "uploading" || step === "registering"}
-                                        className="btn-primary w-full py-4 text-base relative overflow-hidden flex justify-center"
+                                        className="relative flex w-full overflow-hidden py-4 text-base"
                                     >
+                                        <Send className="h-4 w-4" />
                                         <AnimatePresence mode="popLayout">
                                             <motion.span
                                                 key={step}
@@ -383,13 +397,13 @@ export default function CreatePage() {
                                                 {step === "error" && "Try Again"}
                                             </motion.span>
                                         </AnimatePresence>
-                                    </button>
+                                    </Button>
 
                                     {error && (
                                         <motion.p
                                             initial={{ opacity: 0, height: 0 }}
                                             animate={{ opacity: 1, height: "auto" }}
-                                            className="text-accent-red text-sm text-center"
+                                            className="text-center text-sm font-semibold text-accent-red"
                                         >
                                             {error}
                                         </motion.p>
@@ -403,40 +417,42 @@ export default function CreatePage() {
                 {/* Right side Start - Live Preview */}
                 <div className="hidden lg:block relative">
                     <div className="sticky top-24">
-                        <h3 className="text-sm font-bold text-white/40 tracking-widest uppercase mb-6">
+                        <h3 className="mb-6 flex items-center gap-2 text-xs font-black uppercase tracking-widest text-cream/45">
+                            <Eye className="h-4 w-4" />
                             Live Preview
                         </h3>
-                        <div className="glass-card p-6 rotate-1 hover:rotate-0 transition-transform duration-500 max-w-sm ml-auto mr-12 bg-surface-1/80 backdrop-blur-xl border-t border-l border-white/[0.1]">
+                        <Card className="ml-auto mr-12 max-w-sm rotate-1 bg-cream/[0.1] p-6 transition-transform duration-200 hover:rotate-0">
                             <div className="flex items-start justify-between mb-4">
-                                <div className="badge-primary">{form.category || "Category"}</div>
+                                <Badge variant="default">{form.category || "Category"}</Badge>
                                 <div className="text-right">
-                                    <div className="text-2xl font-bold text-primary-400">
+                                    <div className="text-2xl font-black text-retro-yellow">
                                         {form.price || "0"} APT
                                     </div>
-                                    <div className="text-xs text-white/50 capitalize">
+                                    <div className="text-xs font-black uppercase tracking-wide text-cream/45">
                                         {form.pricingModel.replace(/-/g, " ")}
                                     </div>
                                 </div>
                             </div>
 
-                            <h3 className="text-xl font-bold text-white mb-2 line-clamp-2 min-h-[56px]">
+                            <h3 className="mb-2 min-h-[56px] font-display text-xl font-black text-cream line-clamp-2">
                                 {form.title || "Your Prompt Title"}
                             </h3>
-                            <p className="text-sm text-white/60 mb-6 line-clamp-2 min-h-[40px]">
+                            <p className="mb-6 min-h-[40px] text-sm font-semibold text-cream/60 line-clamp-2">
                                 {form.description || "A brief description of what this prompt does and how to use it..."}
                             </p>
 
-                            <div className="flex items-center justify-between pt-4 border-t border-white/[0.04]">
-                                <span className="text-xs font-mono text-white/40">
+                            <div className="flex items-center justify-between border-t border-cream/15 pt-4">
+                                <span className="font-mono text-xs text-cream/45">
                                     by {account?.address ? `${account.address.substring(0, 6)}...${account.address.substring(account.address.length - 4)}` : "you"}
                                 </span>
                                 <div className="flex gap-2">
-                                    <span className="text-xs bg-surface-3 px-2 py-1 rounded-md text-white/50">{form.category}</span>
+                                    <span className="rounded-[5px] border border-cream/20 bg-cream/[0.08] px-2 py-1 text-xs font-black uppercase text-cream/55">
+                                        {form.category}
+                                    </span>
                                 </div>
                             </div>
-                        </div>
-                        {/* Decorative glow behind preview */}
-                        <div className="absolute top-20 right-12 w-64 h-64 bg-primary-500/20 blur-[100px] pointer-events-none -z-10" />
+                        </Card>
+                        <div className="absolute right-6 top-16 -z-10 h-56 w-64 rotate-6 border-2 border-ink bg-retro-cyan/45" />
                     </div>
                 </div>
             </div>

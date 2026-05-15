@@ -8,6 +8,10 @@ import { useCreatorDashboard } from "@/hooks/useCreatorDashboard";
 import { formatApt } from "@/lib/constants";
 import { truncateAddress } from "@/lib/utils";
 import { motion } from "framer-motion";
+import { Badge } from "@/components/ui/badge";
+import { buttonVariants } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Plus, WalletCards } from "lucide-react";
 
 export default function DashboardPage() {
     const { account, connected } = useWallet();
@@ -15,12 +19,15 @@ export default function DashboardPage() {
 
     if (!connected) {
         return (
-            <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-                <div className="glass-card p-12 text-center">
-                    <p className="text-white/40">
+            <div className="mx-auto max-w-5xl px-4 py-12 sm:px-6 lg:px-8">
+                <Card className="p-12 text-center">
+                    <Badge variant="warning" className="mb-4 shadow-neo-sm">
+                        Wallet Required
+                    </Badge>
+                    <p className="font-semibold text-cream/55">
                         Connect your wallet to access your creator dashboard.
                     </p>
-                </div>
+                </Card>
             </div>
         );
     }
@@ -29,9 +36,13 @@ export default function DashboardPage() {
     const activePrompts = prompts.filter((p) => p.status === "active").length;
 
     return (
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-            <div className="flex items-center justify-between mb-8">
+        <div className="mx-auto max-w-5xl px-4 py-12 sm:px-6 lg:px-8">
+            <div className="mb-8 flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
                 <div>
+                    <Badge variant="secondary" className="mb-4 shadow-neo-sm">
+                        <WalletCards className="h-3.5 w-3.5" />
+                        Creator Console
+                    </Badge>
                     <h1 className="section-title">Creator Dashboard</h1>
                     <p className="section-subtitle">
                         {account?.address
@@ -39,8 +50,9 @@ export default function DashboardPage() {
                             : ""}
                     </p>
                 </div>
-                <Link href="/create" className="btn-primary">
-                    + New Prompt
+                <Link href="/create" className={buttonVariants()}>
+                    <Plus className="h-4 w-4" />
+                    New Prompt
                 </Link>
             </div>
 
@@ -60,17 +72,17 @@ export default function DashboardPage() {
                     {
                         label: "Total Unlocks",
                         value: loading ? "..." : totalUnlocks.toString(),
-                        color: "text-primary-400",
+                        color: "text-retro-cyan",
                     },
                     {
                         label: "Active Prompts",
                         value: loading ? "..." : activePrompts.toString(),
-                        color: "text-white",
+                        color: "text-retro-yellow",
                     },
                     {
                         label: "All Prompts",
                         value: loading ? "..." : prompts.length.toString(),
-                        color: "text-white/60",
+                        color: "text-cream/70",
                     },
                 ].map((stat, i) => (
                     <motion.div
@@ -78,20 +90,23 @@ export default function DashboardPage() {
                         initial={{ opacity: 0, y: 20 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ duration: 0.4, delay: i * 0.1 }}
-                        className="glass-card p-5 holographic-hover"
                     >
-                        <div className={`text-2xl font-bold ${stat.color}`}>
-                            {stat.value}
-                        </div>
-                        <div className="text-xs text-white/40 mt-1">{stat.label}</div>
+                        <Card className="h-full p-5 holographic-hover">
+                            <div className={`text-3xl font-black ${stat.color}`}>
+                                {stat.value}
+                            </div>
+                            <div className="mt-2 text-[10px] font-black uppercase tracking-widest text-cream/45">
+                                {stat.label}
+                            </div>
+                        </Card>
                     </motion.div>
                 ))}
             </motion.div>
 
             {/* Prompt List */}
-            <div className="glass-card overflow-hidden">
-                <div className="px-6 py-4 border-b border-white/[0.06]">
-                    <h2 className="text-sm font-semibold text-white">Your Prompts</h2>
+            <Card className="overflow-hidden">
+                <div className="border-b-2 border-ink bg-retro-yellow px-6 py-4 text-ink">
+                    <h2 className="text-sm font-black uppercase tracking-wide">Your Prompts</h2>
                 </div>
 
                 {loading ? (
@@ -108,10 +123,10 @@ export default function DashboardPage() {
                     </div>
                 ) : prompts.length === 0 ? (
                     <div className="p-12 text-center">
-                        <p className="text-white/40 mb-4">
+                        <p className="mb-5 font-semibold text-cream/50">
                             You haven't created any prompts yet.
                         </p>
-                        <Link href="/create" className="btn-primary">
+                        <Link href="/create" className={buttonVariants()}>
                             Create Your First Prompt
                         </Link>
                     </div>
@@ -119,7 +134,7 @@ export default function DashboardPage() {
                     <motion.div
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
-                        className="divide-y divide-white/[0.04]"
+                        className="divide-y divide-cream/10"
                     >
                         {prompts.map((prompt, i) => (
                             <motion.div
@@ -130,32 +145,29 @@ export default function DashboardPage() {
                             >
                                 <Link
                                     href={`/prompt/${prompt.promptId}`}
-                                    className="flex items-center justify-between px-6 py-4
-                               hover:bg-white/[0.02] transition-colors"
+                                    className="flex items-center justify-between px-6 py-4 transition-colors hover:bg-cream/[0.06]"
                                 >
                                     <div className="flex-1 min-w-0">
                                         <div className="flex items-center gap-2">
-                                            <h3 className="text-sm font-medium text-white truncate">
+                                            <h3 className="truncate text-sm font-black text-cream">
                                                 {prompt.title}
                                             </h3>
-                                            <span
-                                                className={`badge text-[10px] ${prompt.status === "active"
-                                                    ? "badge-green"
-                                                    : "bg-white/[0.06] text-white/30"
-                                                    }`}
+                                            <Badge
+                                                variant={prompt.status === "active" ? "success" : "outline"}
+                                                className="text-[10px]"
                                             >
                                                 {prompt.status}
-                                            </span>
+                                            </Badge>
                                         </div>
-                                        <div className="text-xs text-white/30 mt-0.5">
+                                        <div className="mt-1 text-xs font-semibold text-cream/40">
                                             {prompt.category} • {prompt.pricingModel.replace(/-/g, " ")}
                                         </div>
                                     </div>
                                     <div className="text-right shrink-0 ml-4">
-                                        <div className="text-sm font-medium text-accent-green">
+                                        <div className="text-sm font-black text-accent-green">
                                             {formatApt(prompt.totalRevenue)}
                                         </div>
-                                        <div className="text-xs text-white/30">
+                                        <div className="text-xs font-semibold text-cream/35">
                                             {prompt.totalUnlocks} unlocks
                                         </div>
                                     </div>
@@ -164,7 +176,7 @@ export default function DashboardPage() {
                         ))}
                     </motion.div>
                 )}
-            </div>
+            </Card>
         </div>
     );
 }
