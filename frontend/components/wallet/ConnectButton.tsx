@@ -17,7 +17,7 @@ export function ConnectButton() {
             <div className="relative">
                 <button
                     onClick={() => setShowMenu(!showMenu)}
-                    className="inline-flex items-center gap-2 rounded-[7px] border-2 border-ink bg-retro-mint px-4 py-2.5 text-sm font-black uppercase tracking-wide text-ink shadow-neo-sm transition-all duration-150 hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none"
+                    className="inline-flex min-h-11 items-center gap-2 rounded-[7px] border-2 border-ink bg-retro-mint px-4 py-2.5 text-sm font-black uppercase tracking-wide text-ink shadow-neo-sm transition-all duration-150 hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none"
                 >
                     <span className="h-2 w-2 rounded-full border border-ink bg-accent-green animate-pulse" />
                     {truncateAddress(account.address.toString())}
@@ -36,7 +36,7 @@ export function ConnectButton() {
                                     disconnect();
                                     setShowMenu(false);
                                 }}
-                                className="flex w-full items-center gap-2 rounded-[6px] px-3 py-2.5 text-left text-sm font-black uppercase tracking-wide text-cream/70 transition-colors hover:bg-retro-coral hover:text-ink"
+                                className="flex min-h-11 w-full items-center gap-2 rounded-[6px] px-3 py-2.5 text-left text-sm font-black uppercase tracking-wide text-cream/70 transition-colors hover:bg-retro-coral hover:text-ink"
                             >
                                 <LogOut className="h-4 w-4" />
                                 Disconnect

@@ -2,10 +2,9 @@
 /// Verifies on-chain access before serving blob content
 
 import { NextRequest, NextResponse } from "next/server";
-import { aptosClient } from "@/lib/aptos";
-import { hasAccess, getPromptBlobId, getPromptMetadata } from "@/lib/contracts";
+import { hasAccess, getPromptBlobId } from "@/lib/contracts";
 import { shelbyService } from "@/lib/shelby";
-import { MODULES } from "@/lib/constants";
+import { getErrorMessage, isRateLimitError } from "@/lib/utils";
 
 export const runtime = "edge";
 
@@ -14,6 +13,9 @@ export async function GET(
     { params }: { params: { id: string } }
 ) {
     const promptId = params.id;
+    if (!promptId) {
+        return NextResponse.json({ error: "Missing prompt id" }, { status: 400 });
+    }
 
     // 1. Extract wallet address from header
     const walletAddress = req.headers.get("X-Wallet-Address");
@@ -21,6 +23,12 @@ export async function GET(
         return NextResponse.json(
             { error: "Missing X-Wallet-Address header" },
             { status: 401 }
+        );
+    }
+    if (!walletAddress.startsWith("0x")) {
+        return NextResponse.json(
+            { error: "Invalid wallet address" },
+            { status: 400 }
         );
     }
 
@@ -56,11 +64,15 @@ export async function GET(
             content,
             timestamp: Date.now(),
         });
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error("API error:", error);
         return NextResponse.json(
-            { error: "Internal server error" },
-            { status: 500 }
+            {
+                error: isRateLimitError(error)
+                    ? "Aptos is rate limiting requests. Please retry in a few seconds."
+                    : getErrorMessage(error, "Internal server error"),
+            },
+            { status: isRateLimitError(error) ? 429 : 500 }
         );
     }
 }

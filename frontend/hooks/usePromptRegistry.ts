@@ -4,8 +4,20 @@
 
 import { useState, useEffect, useCallback } from "react";
 import type { PromptMetadata } from "@/types";
+import { getErrorMessage, isRateLimitError } from "@/lib/utils";
 
 const CACHE_TTL_MS = 30_000;
+
+type RegistryLoadResult = {
+    prompts: PromptMetadata[];
+    stale?: boolean;
+};
+
+type RegistryPayload = {
+    prompts?: PromptMetadata[];
+    stale?: boolean;
+    error?: string;
+};
 
 let browserCache:
     | {
@@ -13,31 +25,35 @@ let browserCache:
           timestamp: number;
       }
     | null = null;
-let browserInFlight: Promise<PromptMetadata[]> | null = null;
+let browserInFlight: Promise<RegistryLoadResult> | null = null;
 
-async function loadPromptRegistry(force = false): Promise<PromptMetadata[]> {
+async function loadPromptRegistry(force = false): Promise<RegistryLoadResult> {
     if (
         !force &&
         browserCache &&
         Date.now() - browserCache.timestamp < CACHE_TTL_MS
     ) {
-        return browserCache.prompts;
+        return { prompts: browserCache.prompts };
     }
     if (!force && browserInFlight) return browserInFlight;
 
     browserInFlight = fetch("/api/v1/registry", { cache: "no-store" })
         .then(async (response) => {
-            const payload = await response.json().catch(() => ({}));
+            const payload = (await response.json().catch(() => ({}))) as RegistryPayload;
             if (!response.ok) {
                 throw new Error(
                     payload?.error || `HTTP ${response.status}: ${response.statusText}`
                 );
             }
-            return payload.prompts as PromptMetadata[];
+            return {
+                prompts: payload.prompts ?? [],
+                stale: payload.stale,
+            };
         })
-        .then((prompts) => {
+        .then((result) => {
+            const prompts = result.prompts;
             browserCache = { prompts, timestamp: Date.now() };
-            return prompts;
+            return result;
         })
         .finally(() => {
             browserInFlight = null;
@@ -50,13 +66,15 @@ export function usePromptRegistry(category?: string) {
     const [prompts, setPrompts] = useState<PromptMetadata[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [stale, setStale] = useState(false);
 
     const fetchPrompts = useCallback(async (force = false) => {
         setLoading(true);
         setError(null);
 
         try {
-            let filtered = await loadPromptRegistry(force);
+            const result = await loadPromptRegistry(force);
+            let filtered = result.prompts;
 
             // Category filter
             if (category) {
@@ -64,9 +82,14 @@ export function usePromptRegistry(category?: string) {
             }
 
             setPrompts(filtered);
-        } catch (err: any) {
-            console.error("Failed to fetch prompts:", err);
-            setError(err?.message || "Failed to load prompts");
+            setStale(Boolean(result.stale));
+        } catch (err: unknown) {
+            setStale(false);
+            setError(
+                isRateLimitError(err)
+                    ? "Aptos is rate limiting registry requests. Wait a moment, then retry."
+                    : getErrorMessage(err, "Failed to load prompts")
+            );
         } finally {
             setLoading(false);
         }
@@ -80,6 +103,7 @@ export function usePromptRegistry(category?: string) {
         prompts,
         loading,
         error,
+        stale,
         refresh: () => fetchPrompts(true),
     };
 }

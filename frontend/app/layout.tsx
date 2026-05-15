@@ -34,8 +34,7 @@ export default function RootLayout({
     return (
         <html lang="en" className={`dark ${inter.variable} ${outfit.variable}`}>
             <body className="relative flex min-h-screen flex-col overflow-x-hidden bg-retro-paper font-sans text-cream antialiased">
-                <div className="fixed inset-0 w-full h-full bg-noise mix-blend-overlay" />
-                <div className="fixed inset-0 retro-grid opacity-70 pointer-events-none" />
+                <div aria-hidden className="fixed inset-0 w-full h-full bg-noise mix-blend-overlay" />
                 <div
                     aria-hidden
                     className="fixed inset-x-0 top-0 h-28 border-b-2 border-ink bg-cream/[0.04] backdrop-blur-xl pointer-events-none"

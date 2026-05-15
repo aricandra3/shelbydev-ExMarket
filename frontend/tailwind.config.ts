@@ -10,13 +10,13 @@ module.exports = {
                 ink: "#111111",
                 cream: "#fff4d6",
                 retro: {
-                    yellow: "#ffd84d",
-                    coral: "#ff6b57",
-                    mint: "#8ff0c2",
-                    cyan: "#74d7ff",
-                    lime: "#b9ff66",
-                    pink: "#ff8bd1",
-                    grape: "#8f7cff",
+                    yellow: "#e7c95a",
+                    coral: "#d96b5c",
+                    mint: "#94d6b4",
+                    cyan: "#7cb8ce",
+                    lime: "#a7cf73",
+                    pink: "#d28ab2",
+                    grape: "#8d82d4",
                 },
                 primary: {
                     50: "#fff9db",
@@ -65,10 +65,10 @@ module.exports = {
                     4: "#4a372a",
                 },
                 accent: {
-                    green: "#8ff0c2",
-                    amber: "#ffd84d",
-                    red: "#ff6b57",
-                    purple: "#8f7cff",
+                    green: "#94d6b4",
+                    amber: "#e7c95a",
+                    red: "#d96b5c",
+                    purple: "#8d82d4",
                 },
             },
             fontFamily: {
@@ -79,9 +79,9 @@ module.exports = {
             backgroundImage: {
                 "gradient-radial": "radial-gradient(var(--tw-gradient-stops))",
                 "hero-glow":
-                    "radial-gradient(ellipse at 50% 0%, rgba(255,216,77,0.2) 0%, transparent 62%)",
+                    "radial-gradient(ellipse at 50% 0%, rgba(231,201,90,0.14) 0%, transparent 62%)",
                 "retro-paper":
-                    "radial-gradient(circle at 10% 20%, rgba(255,107,87,0.18), transparent 24%), radial-gradient(circle at 88% 8%, rgba(116,215,255,0.16), transparent 26%), linear-gradient(135deg, #17120f 0%, #211915 45%, #2c211b 100%)",
+                    "radial-gradient(circle at 10% 20%, rgba(217,107,92,0.12), transparent 24%), radial-gradient(circle at 88% 8%, rgba(124,184,206,0.1), transparent 26%), linear-gradient(135deg, #17120f 0%, #211915 45%, #2c211b 100%)",
             },
             boxShadow: {
                 neo: "6px 6px 0 #111111",

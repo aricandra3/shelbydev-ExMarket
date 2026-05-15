@@ -3,6 +3,7 @@
 
 import { Aptos, AptosConfig, Network } from "@aptos-labs/ts-sdk";
 import { NETWORK, APTOS_NODE_URL, APTOS_INDEXER_URL, APTOS_API_KEY } from "./constants";
+import { isRateLimitError } from "./utils";
 
 // ── Network Mapping ─────────────────────────────
 // "shelbynet" is a custom Aptos network, so we use CUSTOM and provide URLs
@@ -60,13 +61,8 @@ async function retryView<T>(task: () => Promise<T>, retries = 2): Promise<T> {
     for (let attempt = 0; attempt <= retries; attempt += 1) {
         try {
             return await task();
-        } catch (error: any) {
-            const message = String(error?.message || error || "");
-            const isRateLimited =
-                message.includes("429") ||
-                message.toLowerCase().includes("too many requests");
-
-            if (!isRateLimited || attempt === retries) {
+        } catch (error: unknown) {
+            if (!isRateLimitError(error) || attempt === retries) {
                 throw error;
             }
 

@@ -8,9 +8,10 @@ import { usePromptRegistry } from "@/hooks/usePromptRegistry";
 import { PROMPT_CATEGORIES } from "@/types";
 import { formatApt } from "@/lib/constants";
 import { cn } from "@/lib/utils";
-import { motion } from "framer-motion";
+import { motion, useReducedMotion } from "framer-motion";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { buttonVariants } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { ArrowRight, Search } from "lucide-react";
 
@@ -18,7 +19,8 @@ export default function ExplorePage() {
     const [selectedCategory, setSelectedCategory] = useState<string | undefined>(
         undefined
     );
-    const { prompts, loading, error } = usePromptRegistry(selectedCategory);
+    const { prompts, loading, error, stale, refresh } = usePromptRegistry(selectedCategory);
+    const shouldReduceMotion = useReducedMotion();
 
     return (
         <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
@@ -36,12 +38,21 @@ export default function ExplorePage() {
                 </p>
             </div>
 
+            {stale && !error && (
+                <Alert className="mb-6 border-retro-yellow/70 bg-retro-yellow/10">
+                    <AlertTitle>Showing cached registry data</AlertTitle>
+                    <AlertDescription>
+                        Aptos is slow or temporarily rate limiting requests. Listings will refresh automatically.
+                    </AlertDescription>
+                </Alert>
+            )}
+
             {/* Category Filter */}
-            <div className="flex flex-wrap gap-2 mb-8">
+            <div className="flex flex-wrap gap-2.5 mb-8">
                 <button
                     onClick={() => setSelectedCategory(undefined)}
                     className={cn(
-                        "px-4 py-2 rounded-lg text-sm font-medium transition-all",
+                        "min-h-11 rounded-[7px] px-4 py-2 text-sm font-black transition-all",
                         !selectedCategory
                             ? "border-2 border-ink bg-retro-yellow text-ink shadow-neo-sm"
                             : "border-2 border-transparent bg-cream/[0.04] text-cream/45 hover:border-cream/50 hover:text-cream"
@@ -54,7 +65,7 @@ export default function ExplorePage() {
                         key={cat}
                         onClick={() => setSelectedCategory(cat)}
                         className={cn(
-                        "px-4 py-2 rounded-lg text-sm font-medium transition-all",
+                        "min-h-11 rounded-[7px] px-4 py-2 text-sm font-black transition-all",
                         selectedCategory === cat
                             ? "border-2 border-ink bg-retro-cyan text-ink shadow-neo-sm"
                             : "border-2 border-transparent bg-cream/[0.04] text-cream/45 hover:border-cream/50 hover:text-cream"
@@ -71,9 +82,9 @@ export default function ExplorePage() {
                     {Array.from({ length: 6 }).map((_, i) => (
                         <motion.div
                             key={`skeleton-${i}`}
-                            initial={{ opacity: 0, y: 20 }}
+                            initial={shouldReduceMotion ? { opacity: 1, y: 0 } : { opacity: 0, y: 20 }}
                             animate={{ opacity: 1, y: 0 }}
-                            transition={{ delay: i * 0.1, duration: 0.5 }}
+                            transition={shouldReduceMotion ? { duration: 0 } : { delay: i * 0.1, duration: 0.5 }}
                         >
                             <Card className="flex h-[250px] animate-pulse flex-col justify-between p-6">
                                 <div className="flex items-start justify-between">
@@ -93,9 +104,13 @@ export default function ExplorePage() {
                     ))}
                 </div>
             ) : error ? (
-                <Card className="p-8 text-center">
-                    <p className="text-sm font-semibold text-accent-red">{error}</p>
-                </Card>
+                <Alert className="p-6">
+                    <AlertTitle>Could not load marketplace data</AlertTitle>
+                    <AlertDescription className="mb-4">{error}</AlertDescription>
+                    <Button onClick={refresh} size="sm" variant="outline">
+                        Retry
+                    </Button>
+                </Alert>
             ) : null}
 
             {/* Prompt Grid */}
@@ -114,14 +129,15 @@ export default function ExplorePage() {
                         <motion.div
                             initial={{ opacity: 0 }}
                             animate={{ opacity: 1 }}
+                            transition={shouldReduceMotion ? { duration: 0 } : undefined}
                             className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6"
                         >
                             {prompts.map((prompt, i) => (
                                 <motion.div
                                     key={prompt.promptId}
-                                    initial={{ opacity: 0, y: 20 }}
+                                    initial={shouldReduceMotion ? { opacity: 1, y: 0 } : { opacity: 0, y: 20 }}
                                     animate={{ opacity: 1, y: 0 }}
-                                    transition={{ duration: 0.4, delay: i * 0.05 }}
+                                    transition={shouldReduceMotion ? { duration: 0 } : { duration: 0.4, delay: i * 0.05 }}
                                 >
                                     <Link
                                         href={`/prompt/${prompt.promptId}`}

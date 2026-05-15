@@ -7,15 +7,17 @@ import { useWallet } from "@aptos-labs/wallet-adapter-react";
 import { useCreatorDashboard } from "@/hooks/useCreatorDashboard";
 import { formatApt } from "@/lib/constants";
 import { truncateAddress } from "@/lib/utils";
-import { motion } from "framer-motion";
+import { motion, useReducedMotion } from "framer-motion";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { buttonVariants } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Plus, WalletCards } from "lucide-react";
 
 export default function DashboardPage() {
     const { account, connected } = useWallet();
-    const { prompts, totalRevenue, loading } = useCreatorDashboard();
+    const { prompts, totalRevenue, loading, error, refresh } = useCreatorDashboard();
+    const shouldReduceMotion = useReducedMotion();
 
     if (!connected) {
         return (
@@ -56,11 +58,21 @@ export default function DashboardPage() {
                 </Link>
             </div>
 
+            {error && (
+                <Alert className="mb-6 p-5">
+                    <AlertTitle>Dashboard data is temporarily unavailable</AlertTitle>
+                    <AlertDescription className="mb-4">{error}</AlertDescription>
+                    <Button onClick={refresh} size="sm" variant="outline">
+                        Retry
+                    </Button>
+                </Alert>
+            )}
+
             {/* Stats Grid */}
             <motion.div
-                initial={{ opacity: 0, y: 20 }}
+                initial={shouldReduceMotion ? { opacity: 1, y: 0 } : { opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.4 }}
+                transition={shouldReduceMotion ? { duration: 0 } : { duration: 0.4 }}
                 className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8"
             >
                 {[
@@ -87,9 +99,9 @@ export default function DashboardPage() {
                 ].map((stat, i) => (
                     <motion.div
                         key={stat.label}
-                        initial={{ opacity: 0, y: 20 }}
+                        initial={shouldReduceMotion ? { opacity: 1, y: 0 } : { opacity: 0, y: 20 }}
                         animate={{ opacity: 1, y: 0 }}
-                        transition={{ duration: 0.4, delay: i * 0.1 }}
+                        transition={shouldReduceMotion ? { duration: 0 } : { duration: 0.4, delay: i * 0.1 }}
                     >
                         <Card className="h-full p-5 holographic-hover">
                             <div className={`text-3xl font-black ${stat.color}`}>
@@ -114,9 +126,9 @@ export default function DashboardPage() {
                         {Array.from({ length: 3 }).map((_, i) => (
                             <motion.div
                                 key={i}
-                                initial={{ opacity: 0, x: -20 }}
+                                initial={shouldReduceMotion ? { opacity: 1, x: 0 } : { opacity: 0, x: -20 }}
                                 animate={{ opacity: 1, x: 0 }}
-                                transition={{ duration: 0.4, delay: i * 0.1 }}
+                                transition={shouldReduceMotion ? { duration: 0 } : { duration: 0.4, delay: i * 0.1 }}
                                 className="skeleton h-12 w-full"
                             />
                         ))}
@@ -134,14 +146,15 @@ export default function DashboardPage() {
                     <motion.div
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
+                        transition={shouldReduceMotion ? { duration: 0 } : undefined}
                         className="divide-y divide-cream/10"
                     >
                         {prompts.map((prompt, i) => (
                             <motion.div
                                 key={prompt.promptId}
-                                initial={{ opacity: 0, x: -20 }}
+                                initial={shouldReduceMotion ? { opacity: 1, x: 0 } : { opacity: 0, x: -20 }}
                                 animate={{ opacity: 1, x: 0 }}
-                                transition={{ duration: 0.3, delay: i * 0.05 }}
+                                transition={shouldReduceMotion ? { duration: 0 } : { duration: 0.3, delay: i * 0.05 }}
                             >
                                 <Link
                                     href={`/prompt/${prompt.promptId}`}

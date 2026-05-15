@@ -4,7 +4,7 @@
 
 import Link from "next/link";
 import { useWallet } from "@aptos-labs/wallet-adapter-react";
-import { motion } from "framer-motion";
+import { motion, useReducedMotion } from "framer-motion";
 import type { Variants } from "framer-motion";
 import { ArrowRight, Coins, Cuboid, ShieldCheck, Sparkles, UploadCloud } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -15,15 +15,21 @@ import { Separator } from "@/components/ui/separator";
 // ── Animation ─────────────────────────────────────────────
 const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
 
-const stagger: Variants = {
+const getStagger = (reduceMotion: boolean): Variants => ({
     hidden: {},
-    show: { transition: { staggerChildren: 0.1, delayChildren: 0.05 } },
-};
+    show: reduceMotion
+        ? {}
+        : { transition: { staggerChildren: 0.1, delayChildren: 0.05 } },
+});
 
-const rise: Variants = {
-    hidden: { opacity: 0, y: 18 },
-    show: { opacity: 1, y: 0, transition: { duration: 0.65, ease: EASE } },
-};
+const getRise = (reduceMotion: boolean): Variants => ({
+    hidden: reduceMotion ? { opacity: 1, y: 0 } : { opacity: 0, y: 18 },
+    show: {
+        opacity: 1,
+        y: 0,
+        transition: reduceMotion ? { duration: 0 } : { duration: 0.65, ease: EASE },
+    },
+});
 
 // ── Data ──────────────────────────────────────────────────
 const STATS = [
@@ -53,14 +59,17 @@ const FEATURES = [
 // ── Component ─────────────────────────────────────────────
 export default function HomePage() {
     const { connected } = useWallet();
+    const shouldReduceMotion = Boolean(useReducedMotion());
+    const stagger = getStagger(shouldReduceMotion);
+    const rise = getRise(shouldReduceMotion);
 
     return (
         <div className="flex flex-col">
 
             <section className="relative overflow-hidden px-4 pb-14 pt-8 md:px-6 md:pb-20 md:pt-10">
-                <div aria-hidden className="absolute inset-x-0 top-16 h-16 -rotate-2 border-y-2 border-ink bg-retro-coral/80" />
-                <div aria-hidden className="absolute bottom-12 left-0 h-14 w-2/5 rotate-2 border-y-2 border-r-2 border-ink bg-retro-cyan/70" />
-                <div aria-hidden className="halftone absolute right-4 top-28 h-40 w-40 opacity-50" />
+                <div aria-hidden className="absolute inset-x-0 top-16 h-14 -rotate-2 border-y-2 border-ink/85 bg-retro-coral/30" />
+                <div aria-hidden className="absolute bottom-12 left-0 h-12 w-2/5 rotate-2 border-y-2 border-r-2 border-ink/85 bg-retro-cyan/25" />
+                <div aria-hidden className="halftone absolute right-4 top-32 hidden h-36 w-36 opacity-25 md:block" />
 
                 <motion.div
                     className="relative z-10 mx-auto grid min-h-[70vh] max-w-7xl items-center gap-10 lg:grid-cols-2"
@@ -82,7 +91,7 @@ export default function HomePage() {
                             style={{ textShadow: "5px 5px 0 #111111" }}
                         >
                             ExMarket{" "}
-                            <span className="block text-retro-yellow">Prompt Bazaar</span>
+                            <span className="block text-retro-yellow">Prompt Marketplace</span>
                         </motion.h1>
 
                         <motion.p

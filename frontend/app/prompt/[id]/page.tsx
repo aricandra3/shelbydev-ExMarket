@@ -11,9 +11,10 @@ import { useAccessCheck } from "@/hooks/useAccessCheck";
 import { useUnlockPrompt } from "@/hooks/useUnlockPrompt";
 import { getPromptMetadata } from "@/lib/contracts";
 import { formatApt } from "@/lib/constants";
-import { truncateAddress, timeAgo, copyToClipboard } from "@/lib/utils";
+import { copyToClipboard, getErrorMessage, truncateAddress } from "@/lib/utils";
 import type { PromptMetadata } from "@/types";
 import { aceDecrypt, getSigningMessage } from "@/lib/ace";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -26,33 +27,52 @@ export default function PromptDetailPage() {
 
     const [prompt, setPrompt] = useState<PromptMetadata | null>(null);
     const [loading, setLoading] = useState(true);
+    const [loadError, setLoadError] = useState<string | null>(null);
+    const [loadAttempt, setLoadAttempt] = useState(0);
     const [content, setContent] = useState<string | null>(null);
     const [decrypting, setDecrypting] = useState(false);
+    const [decryptError, setDecryptError] = useState<string | null>(null);
+    const [decryptAttempt, setDecryptAttempt] = useState(0);
     const [copied, setCopied] = useState(false);
+    const [copyError, setCopyError] = useState(false);
 
     const { hasAccess, loading: accessLoading, refresh: refreshAccess } = useAccessCheck(promptId);
-    const { txState, unlockPrompt, purchaseApiCalls, reset } = useUnlockPrompt();
+    const { txState, unlockPrompt, reset } = useUnlockPrompt();
 
     // Fetch prompt metadata
     useEffect(() => {
+        let cancelled = false;
+
         async function load() {
+            setLoading(true);
+            setLoadError(null);
             try {
                 const data = await getPromptMetadata(promptId);
-                setPrompt(data);
-            } catch (err) {
-                console.error("Failed to load prompt:", err);
+                if (!cancelled) setPrompt(data);
+            } catch (err: unknown) {
+                if (!cancelled) {
+                    setPrompt(null);
+                    setLoadError(getErrorMessage(err, "Prompt metadata could not be loaded."));
+                }
             } finally {
-                setLoading(false);
+                if (!cancelled) setLoading(false);
             }
         }
         if (promptId) load();
-    }, [promptId]);
+
+        return () => {
+            cancelled = true;
+        };
+    }, [promptId, loadAttempt]);
 
     // Auto-decrypt and load content when user has access
     useEffect(() => {
+        let cancelled = false;
+
         async function loadAndDecryptContent() {
             if (!hasAccess || !prompt?.blobId || content || !account) return;
             setDecrypting(true);
+            setDecryptError(null);
             try {
                 // 1. Fetch the encrypted blob from Shelby
                 const { shelbyService } = await import("@/lib/shelby");
@@ -69,11 +89,13 @@ export default function PromptDetailPage() {
                 // 3. Convert wallet adapter key/sig to proper SDK class instances
                 //    Wallet adapter returns plain objects; ACE SDK needs instanceof-compatible classes
                 const rawPk = account.publicKey;
-                const pkHex = typeof rawPk === "string" ? rawPk : (rawPk as any).toString();
+                if (!rawPk) throw new Error("Wallet public key is unavailable.");
+                const pkHex = typeof rawPk === "string" ? rawPk : rawPk.toString();
                 const publicKey = new Ed25519PublicKey(pkHex);
 
                 const rawSig = signResponse.signature;
-                const sigHex = typeof rawSig === "string" ? rawSig : (rawSig as any).toString();
+                if (!rawSig) throw new Error("Wallet signature was not returned.");
+                const sigHex = typeof rawSig === "string" ? rawSig : rawSig.toString();
                 const signature = new Ed25519Signature(sigHex);
 
                 const fullMessage = signResponse.fullMessage;
@@ -88,17 +110,21 @@ export default function PromptDetailPage() {
                     fullMessage,
                 });
 
-                setContent(plaintext);
-            } catch (err: any) {
-                console.error("ACE decrypt failed:", err);
-                setContent(`⚠️ Decryption failed: ${err?.message ?? "Unknown error"}`);
+                if (!cancelled) setContent(plaintext);
+            } catch (err: unknown) {
+                if (!cancelled) {
+                    setDecryptError(getErrorMessage(err, "Decryption failed. Please try again."));
+                }
             } finally {
-                setDecrypting(false);
+                if (!cancelled) setDecrypting(false);
             }
         }
         loadAndDecryptContent();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [hasAccess, prompt?.blobId, account]);
+
+        return () => {
+            cancelled = true;
+        };
+    }, [hasAccess, prompt?.blobId, account, content, signMessage, decryptAttempt]);
 
     // After successful unlock, refresh access and load content
     useEffect(() => {
@@ -114,10 +140,21 @@ export default function PromptDetailPage() {
 
     const handleCopy = async () => {
         if (content) {
-            await copyToClipboard(content);
+            setCopyError(false);
+            const didCopy = await copyToClipboard(content);
+            if (!didCopy) {
+                setCopyError(true);
+                return;
+            }
             setCopied(true);
-            setTimeout(() => setCopied(false), 2000);
+            window.setTimeout(() => setCopied(false), 2000);
         }
+    };
+
+    const handleRetryDecrypt = () => {
+        setContent(null);
+        setDecryptError(null);
+        setDecryptAttempt((attempt) => attempt + 1);
     };
 
     if (loading) {
@@ -136,9 +173,15 @@ export default function PromptDetailPage() {
     if (!prompt) {
         return (
             <div className="mx-auto max-w-4xl px-4 py-12 sm:px-6 lg:px-8">
-                <Card className="p-12 text-center">
-                    <p className="font-semibold text-cream/50">Prompt not found.</p>
-                </Card>
+                <Alert className="p-8 text-center">
+                    <AlertTitle>Prompt unavailable</AlertTitle>
+                    <AlertDescription className="mb-5">
+                        {loadError ?? "Prompt not found."}
+                    </AlertDescription>
+                    <Button onClick={() => setLoadAttempt((attempt) => attempt + 1)} size="sm" variant="outline">
+                        Retry
+                    </Button>
+                </Alert>
             </div>
         );
     }
@@ -147,10 +190,10 @@ export default function PromptDetailPage() {
         <div className="mx-auto max-w-4xl px-4 py-12 sm:px-6 lg:px-8">
             <div className="grid gap-6">
                 {/* Header Card */}
-                <Card className="p-8">
-                    <div className="flex items-start justify-between mb-4">
+                <Card className="p-6 sm:p-8">
+                    <div className="mb-4 flex items-start justify-between gap-4">
                         <Badge>{prompt.category}</Badge>
-                        <div className="text-right">
+                        <div className="shrink-0 text-right">
                             <div className="text-3xl font-black text-retro-yellow">
                                 {formatApt(prompt.price)}
                             </div>
@@ -160,15 +203,15 @@ export default function PromptDetailPage() {
                         </div>
                     </div>
 
-                    <h1 className="mb-3 font-display text-4xl font-black text-cream">
+                    <h1 className="mb-3 break-words font-display text-3xl font-black text-cream sm:text-4xl">
                         {prompt.title}
                     </h1>
-                    <p className="mb-6 font-semibold leading-relaxed text-cream/60">
+                    <p className="mb-6 break-words font-semibold leading-relaxed text-cream/60">
                         {prompt.description}
                     </p>
 
                     {/* Creator + stats row */}
-                    <div className="flex flex-wrap items-center gap-4 text-sm font-semibold text-cream/40">
+                    <div className="flex flex-wrap items-center gap-3 text-sm font-semibold text-cream/40 sm:gap-4">
                         <span>
                             by{" "}
                             <span className="font-mono text-cream/70">
@@ -203,9 +246,15 @@ export default function PromptDetailPage() {
                                 </h2>
                                 <Button onClick={handleCopy} variant="ghost" size="sm">
                                     <Clipboard className="h-4 w-4" />
-                                    {copied ? "Copied ✓" : "Copy"}
+                                    {copied ? "Copied" : "Copy"}
                                 </Button>
                             </div>
+
+                            {copyError && (
+                                <p className="mb-3 text-xs font-semibold text-accent-red">
+                                    Clipboard permission was blocked. Select the content manually to copy it.
+                                </p>
+                            )}
 
                             {decrypting ? (
                                 <div className="space-y-3">
@@ -214,8 +263,16 @@ export default function PromptDetailPage() {
                                         ACE workers verifying on-chain access...
                                     </p>
                                 </div>
+                            ) : decryptError ? (
+                                <Alert className="p-5">
+                                    <AlertTitle>Could not decrypt content</AlertTitle>
+                                    <AlertDescription className="mb-4">{decryptError}</AlertDescription>
+                                    <Button onClick={handleRetryDecrypt} size="sm" variant="outline">
+                                        Retry decrypt
+                                    </Button>
+                                </Alert>
                             ) : content ? (
-                                <div className="max-h-[500px] overflow-y-auto whitespace-pre-wrap rounded-[8px] border-2 border-ink bg-surface-1/75 p-6 font-mono text-sm text-cream/80 shadow-neo-dark backdrop-blur-xl">
+                                <div className="max-h-[500px] overflow-y-auto whitespace-pre-wrap break-words rounded-[8px] border-2 border-ink bg-surface-1/75 p-6 font-mono text-sm text-cream/80 shadow-neo-dark backdrop-blur-xl">
                                     {content}
                                 </div>
                             ) : (
@@ -250,7 +307,7 @@ export default function PromptDetailPage() {
                             </Button>
 
                             {txState.error && (
-                                <p className="mt-3 text-xs font-semibold text-accent-red">
+                                <p className="mt-3 break-words text-xs font-semibold text-accent-red">
                                     {txState.error}
                                 </p>
                             )}

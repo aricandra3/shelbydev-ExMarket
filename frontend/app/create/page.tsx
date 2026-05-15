@@ -12,8 +12,9 @@ import { aptToOctas, PROMPT_CATEGORIES } from "@/lib/constants";
 import { PRICING_MODEL_REVERSE } from "@/types";
 import type { PricingModel } from "@/types";
 import { AccountAddress } from "@aptos-labs/ts-sdk";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { aceEncrypt } from "@/lib/ace";
+import { getErrorMessage } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -21,9 +22,16 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { CalendarClock, CheckCircle2, Eye, Send, Unlock, Zap } from "lucide-react";
 
+const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
+const MAX_TITLE_LENGTH = 120;
+const MAX_DESCRIPTION_LENGTH = 520;
+const MAX_TAGS_LENGTH = 180;
+const MAX_CONTENT_LENGTH = 12_000;
+
 export default function CreatePage() {
     const router = useRouter();
     const { account, connected, signAndSubmitTransaction } = useWallet();
+    const shouldReduceMotion = useReducedMotion();
 
     const [form, setForm] = useState({
         title: "",
@@ -45,6 +53,25 @@ export default function CreatePage() {
         e.preventDefault();
         if (!connected || !account) return;
 
+        setError("");
+
+        const title = form.title.trim();
+        const description = form.description.trim();
+        const content = form.content;
+        const price = Number(form.price);
+
+        if (!title || !description || !content.trim()) {
+            setStep("error");
+            setError("Title, description, and prompt content are required.");
+            return;
+        }
+
+        if (!Number.isFinite(price) || price <= 0) {
+            setStep("error");
+            setError("Enter a valid APT price greater than 0.");
+            return;
+        }
+
         try {
             setStep("registering");
 
@@ -53,7 +80,7 @@ export default function CreatePage() {
                 .map((t) => t.trim())
                 .filter(Boolean);
 
-            const priceInOctas = aptToOctas(parseFloat(form.price));
+            const priceInOctas = aptToOctas(price);
             const pricingModelNum = PRICING_MODEL_REVERSE[form.pricingModel];
 
             // ─── PHASE 1: Register on-chain with placeholder blob_id ──────────
@@ -63,8 +90,8 @@ export default function CreatePage() {
             const placeholderBlobId = "pending";
             const payload = buildRegisterPromptPayload(
                 placeholderBlobId,
-                form.title,
-                form.description,
+                title,
+                description,
                 form.category,
                 tags,
                 pricingModelNum,
@@ -90,7 +117,7 @@ export default function CreatePage() {
             setStep("uploading");
 
             const blobName = `prompt_${Date.now()}.txt`;
-            const { ciphertextHex, domainHex } = await aceEncrypt(form.content, promptId);
+            const { ciphertextHex, domainHex } = await aceEncrypt(content, promptId);
             const encryptedPayload = JSON.stringify({ ciphertextHex, domainHex });
             const uploadBytes = new TextEncoder().encode(encryptedPayload);
 
@@ -130,7 +157,6 @@ export default function CreatePage() {
                 options: { checkSuccess: true, waitForIndexer: true } as any,
             });
 
-            console.log("Waiting for Shelby indexer to sync...");
             await new Promise((resolve) => setTimeout(resolve, 3000));
 
             // ─── PHASE 5: Upload encrypted blob via Shelby RPC ───────────────
@@ -156,9 +182,8 @@ export default function CreatePage() {
 
             setTxHash(updateResponse.hash);
             setStep("success");
-        } catch (err: any) {
-            console.error(err);
-            setError(err?.message || "Something went wrong");
+        } catch (err: unknown) {
+            setError(getErrorMessage(err, "Something went wrong while publishing."));
             setStep("error");
         }
     };
@@ -168,8 +193,9 @@ export default function CreatePage() {
         return (
             <div className="mx-auto max-w-2xl px-4 py-16 sm:px-6 lg:px-8">
                 <motion.div
-                    initial={{ opacity: 0, scale: 0.95 }}
+                    initial={shouldReduceMotion ? { opacity: 1, scale: 1 } : { opacity: 0, scale: 0.95 }}
                     animate={{ opacity: 1, scale: 1 }}
+                    transition={shouldReduceMotion ? { duration: 0 } : { duration: 0.3, ease: EASE }}
                 >
                     <Card className="p-12 text-center">
                         <Badge variant="warning" className="mb-5 shadow-neo-sm">
@@ -208,10 +234,10 @@ export default function CreatePage() {
                         {step === "success" ? (
                             <motion.div
                                 key="success"
-                                initial={{ opacity: 0, scale: 0.95, y: 10 }}
+                                initial={shouldReduceMotion ? { opacity: 1, scale: 1, y: 0 } : { opacity: 0, scale: 0.95, y: 10 }}
                                 animate={{ opacity: 1, scale: 1, y: 0 }}
-                                exit={{ opacity: 0, scale: 0.95, y: -10 }}
-                                transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+                                exit={shouldReduceMotion ? { opacity: 1, scale: 1, y: 0 } : { opacity: 0, scale: 0.95, y: -10 }}
+                                transition={shouldReduceMotion ? { duration: 0 } : { duration: 0.4, ease: EASE }}
                             >
                                 <Card className="p-12 text-center">
                                     <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-[8px] border-2 border-ink bg-retro-lime text-ink shadow-neo">
@@ -236,10 +262,10 @@ export default function CreatePage() {
                         ) : (
                             <motion.div
                                 key="form"
-                                initial={{ opacity: 0, y: 20 }}
+                                initial={shouldReduceMotion ? { opacity: 1, y: 0 } : { opacity: 0, y: 20 }}
                                 animate={{ opacity: 1, y: 0 }}
-                                exit={{ opacity: 0, y: -20 }}
-                                transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+                                exit={shouldReduceMotion ? { opacity: 1, y: 0 } : { opacity: 0, y: -20 }}
+                                transition={shouldReduceMotion ? { duration: 0 } : { duration: 0.4, ease: EASE }}
                             >
                                 <form onSubmit={handleSubmit} className="space-y-6">
                                     <Card className="space-y-5 p-8">
@@ -251,6 +277,8 @@ export default function CreatePage() {
                                             <Input
                                                 type="text"
                                                 required
+                                                minLength={2}
+                                                maxLength={MAX_TITLE_LENGTH}
                                                 placeholder="e.g. Ultimate SEO Blog Post Generator"
                                                 value={form.title}
                                                 onChange={(e) => setForm({ ...form, title: e.target.value })}
@@ -264,6 +292,7 @@ export default function CreatePage() {
                                             </label>
                                             <Textarea
                                                 required
+                                                maxLength={MAX_DESCRIPTION_LENGTH}
                                                 rows={3}
                                                 placeholder="Describe what your prompt does and who it's for..."
                                                 value={form.description}
@@ -298,6 +327,7 @@ export default function CreatePage() {
                                             </label>
                                             <Input
                                                 type="text"
+                                                maxLength={MAX_TAGS_LENGTH}
                                                 placeholder="e.g. seo, blog, marketing"
                                                 value={form.tags}
                                                 onChange={(e) => setForm({ ...form, tags: e.target.value })}
@@ -323,10 +353,11 @@ export default function CreatePage() {
                                                         <button
                                                             key={model.key}
                                                             type="button"
+                                                            aria-pressed={isActive}
                                                             onClick={() =>
                                                                 setForm({ ...form, pricingModel: model.key })
                                                             }
-                                                            className={`rounded-[7px] border-2 p-3 text-center text-xs font-black uppercase tracking-wide transition-all ${isActive
+                                                            className={`min-h-24 rounded-[7px] border-2 p-3 text-center text-xs font-black uppercase tracking-wide transition-all ${isActive
                                                                 ? "border-ink bg-retro-cyan text-ink shadow-neo-sm"
                                                                 : "border-cream/20 bg-cream/[0.05] text-cream/45 hover:border-cream/60 hover:text-cream"
                                                                 }`}
@@ -349,6 +380,7 @@ export default function CreatePage() {
                                                 required
                                                 min="0.001"
                                                 step="0.001"
+                                                inputMode="decimal"
                                                 placeholder="0.1"
                                                 value={form.price}
                                                 onChange={(e) => setForm({ ...form, price: e.target.value })}
@@ -363,6 +395,7 @@ export default function CreatePage() {
                                         </label>
                                         <Textarea
                                             required
+                                            maxLength={MAX_CONTENT_LENGTH}
                                             rows={12}
                                             className="font-mono text-sm"
                                             placeholder="Paste your full prompt content here. This will be stored on Shelby and only visible to buyers."
@@ -385,10 +418,10 @@ export default function CreatePage() {
                                         <AnimatePresence mode="popLayout">
                                             <motion.span
                                                 key={step}
-                                                initial={{ y: 20, opacity: 0 }}
+                                                initial={shouldReduceMotion ? { y: 0, opacity: 1 } : { y: 20, opacity: 0 }}
                                                 animate={{ y: 0, opacity: 1 }}
-                                                exit={{ y: -20, opacity: 0 }}
-                                                transition={{ duration: 0.3 }}
+                                                exit={shouldReduceMotion ? { y: 0, opacity: 1 } : { y: -20, opacity: 0 }}
+                                                transition={shouldReduceMotion ? { duration: 0 } : { duration: 0.3 }}
                                                 className="block"
                                             >
                                                 {step === "form" && "Publish Prompt"}
@@ -401,8 +434,9 @@ export default function CreatePage() {
 
                                     {error && (
                                         <motion.p
-                                            initial={{ opacity: 0, height: 0 }}
+                                            initial={shouldReduceMotion ? { opacity: 1, height: "auto" } : { opacity: 0, height: 0 }}
                                             animate={{ opacity: 1, height: "auto" }}
+                                            transition={shouldReduceMotion ? { duration: 0 } : undefined}
                                             className="text-center text-sm font-semibold text-accent-red"
                                         >
                                             {error}
@@ -452,7 +486,6 @@ export default function CreatePage() {
                                 </div>
                             </div>
                         </Card>
-                        <div className="absolute right-6 top-16 -z-10 h-56 w-64 rotate-6 border-2 border-ink bg-retro-cyan/45" />
                     </div>
                 </div>
             </div>

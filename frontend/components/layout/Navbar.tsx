@@ -51,7 +51,7 @@ export function Navbar() {
                                         key={link.href}
                                         href={link.href}
                                         className={cn(
-                                            "inline-flex items-center gap-1.5 rounded-[6px] border-2 px-3 py-2 text-[11px] font-black uppercase tracking-wide transition-all",
+                                            "inline-flex min-h-11 items-center gap-1.5 rounded-[6px] border-2 px-3 py-2 text-[11px] font-black uppercase tracking-wide transition-all",
                                             isActive
                                                 ? "border-ink bg-retro-cyan text-ink shadow-neo-sm"
                                                 : "border-transparent text-cream/55 hover:border-cream/60 hover:bg-cream/10 hover:text-cream"

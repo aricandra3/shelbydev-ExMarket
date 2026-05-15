@@ -6,6 +6,29 @@ export function cn(...inputs: ClassValue[]) {
     return clsx(inputs);
 }
 
+export function getErrorMessage(
+    error: unknown,
+    fallback = "Something went wrong"
+): string {
+    if (error instanceof Error && error.message) return error.message;
+    if (typeof error === "string" && error.trim()) return error;
+    if (
+        error &&
+        typeof error === "object" &&
+        "message" in error &&
+        typeof error.message === "string" &&
+        error.message.trim()
+    ) {
+        return error.message;
+    }
+    return fallback;
+}
+
+export function isRateLimitError(error: unknown): boolean {
+    const message = getErrorMessage(error, "").toLowerCase();
+    return message.includes("429") || message.includes("too many requests") || message.includes("rate limit");
+}
+
 /// Truncate an address for display: 0x1234...abcd
 export function truncateAddress(address: string, chars = 4): string {
     if (!address) return "";

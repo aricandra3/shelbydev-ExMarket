@@ -3,7 +3,7 @@
 
 import { NextResponse } from "next/server";
 import { APTOS_API_KEY, APTOS_NODE_URL, MODULE_ADDRESS } from "@/lib/constants";
-import { truncateAddress } from "@/lib/utils";
+import { getErrorMessage, isRateLimitError, truncateAddress } from "@/lib/utils";
 import type { PromptMetadata } from "@/types";
 
 export const dynamic = "force-dynamic";
@@ -11,6 +11,15 @@ export const dynamic = "force-dynamic";
 const CACHE_TTL_MS = 60_000;
 const TRANSACTION_SCAN_LIMIT = 200;
 const RATE_LIMIT_STATUS = 429;
+
+type AptosEvent = {
+    type: string;
+    data: Record<string, string | number | undefined>;
+};
+
+type AptosTransaction = {
+    events?: AptosEvent[];
+};
 
 let cache:
     | {
@@ -32,10 +41,12 @@ async function fetchWithRetry(url: string, init: RequestInit, retries = 2) {
             return response;
         }
 
-        const retryAfter = Number(response.headers.get("retry-after"));
-        const delayMs = Number.isFinite(retryAfter)
-            ? retryAfter * 1000
-            : 600 * (attempt + 1);
+        const retryAfterHeader = response.headers.get("retry-after");
+        const retryAfter = retryAfterHeader ? Number(retryAfterHeader) : Number.NaN;
+        const delayMs = Math.min(
+            Number.isFinite(retryAfter) ? retryAfter * 1000 : 600 * 2 ** attempt,
+            4_000
+        );
         await sleep(delayMs);
     }
 
@@ -72,35 +83,41 @@ async function loadPrompts(): Promise<PromptMetadata[]> {
             throw new Error(`Aptos HTTP ${txResp.status}: ${txResp.statusText}`);
         }
 
-        const txns: any[] = await txResp.json();
+        const txns = (await txResp.json()) as AptosTransaction[];
         const registered = new Map<string, PromptMetadata>();
         const deactivated = new Set<string>();
         const updatedPrices = new Map<string, number>();
 
         txns.flatMap((tx) => tx.events ?? []).forEach((event) => {
             if (event.type === deactivatedTarget) {
-                deactivated.add(event.data.prompt_id);
+                if (typeof event.data.prompt_id === "string") {
+                    deactivated.add(event.data.prompt_id);
+                }
                 return;
             }
 
             if (event.type === updatedTarget) {
-                updatedPrices.set(
-                    event.data.prompt_id,
-                    Number(event.data.new_price)
-                );
+                if (typeof event.data.prompt_id === "string") {
+                    updatedPrices.set(
+                        event.data.prompt_id,
+                        Number(event.data.new_price)
+                    );
+                }
                 return;
             }
 
             if (event.type !== registeredTarget) return;
 
-            const promptId = event.data.prompt_id as string;
+            const promptId = event.data.prompt_id;
+            if (typeof promptId !== "string") return;
+            const creator = String(event.data.creator ?? "");
             registered.set(promptId, {
                 promptId,
-                creator: event.data.creator as string,
-                blobId: event.data.blob_id as string,
-                title: event.data.title as string,
-                description: `Prompt by ${truncateAddress(event.data.creator as string)}. Open the listing for current on-chain details.`,
-                category: event.data.category as string,
+                creator,
+                blobId: String(event.data.blob_id ?? ""),
+                title: String(event.data.title ?? "Untitled prompt"),
+                description: `Prompt by ${truncateAddress(creator)}. Open the listing for current on-chain details.`,
+                category: String(event.data.category ?? "Other"),
                 pricingModel:
                     Number(event.data.pricing_model) === 2
                         ? "subscription"
@@ -148,7 +165,7 @@ export async function GET() {
                 },
             }
         );
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error("Failed to load prompt registry:", error);
 
         if (cache) {
@@ -157,6 +174,7 @@ export async function GET() {
                     prompts: cache.prompts,
                     cachedAt: cache.timestamp,
                     stale: true,
+                    warning: "Showing cached registry data while Aptos is unavailable.",
                 },
                 {
                     headers: {
@@ -168,11 +186,11 @@ export async function GET() {
 
         return NextResponse.json(
             {
-                error:
-                    error?.message ||
-                    "Failed to load prompt registry from Aptos",
+                error: isRateLimitError(error)
+                    ? "Aptos is rate limiting registry requests. Please retry in a few seconds."
+                    : getErrorMessage(error, "Failed to load prompt registry from Aptos"),
             },
-            { status: error?.message?.includes("429") ? 429 : 502 }
+            { status: isRateLimitError(error) ? 429 : 502 }
         );
     }
 }

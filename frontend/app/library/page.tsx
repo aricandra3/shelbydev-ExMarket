@@ -7,28 +7,30 @@ import Link from "next/link";
 import { useWallet } from "@aptos-labs/wallet-adapter-react";
 import { getUserUnlockedPrompts, getPromptMetadata } from "@/lib/contracts";
 import { formatApt } from "@/lib/constants";
+import { getErrorMessage, isRateLimitError } from "@/lib/utils";
 import type { PromptMetadata } from "@/types";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { buttonVariants } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Archive, ArrowRight, LockKeyhole, Search, X } from "lucide-react";
 
 // ── Category → accent colour map ─────────────────────────────────────
 const CATEGORY_COLORS: Record<string, { pill: string; glow: string; icon: string }> = {
-  ChatGPT:           { pill: "border-ink bg-retro-mint text-ink", glow: "rgba(143,240,194,0.18)", icon: "C" },
-  Midjourney:        { pill: "border-ink bg-retro-pink text-ink", glow: "rgba(255,139,209,0.18)", icon: "M" },
-  "Stable Diffusion":{ pill: "border-ink bg-retro-coral text-ink", glow: "rgba(255,107,87,0.18)", icon: "S" },
-  Claude:            { pill: "border-ink bg-retro-yellow text-ink", glow: "rgba(255,216,77,0.18)", icon: "C" },
-  Gemini:            { pill: "border-ink bg-retro-cyan text-ink", glow: "rgba(116,215,255,0.18)", icon: "G" },
-  "Agent Workflow":  { pill: "border-ink bg-retro-grape text-ink", glow: "rgba(143,124,255,0.18)", icon: "A" },
-  Automation:        { pill: "border-ink bg-retro-cyan text-ink", glow: "rgba(116,215,255,0.18)", icon: "AU" },
+  ChatGPT: { pill: "border-ink bg-retro-mint text-ink", glow: "rgba(143,240,194,0.18)", icon: "C" },
+  Midjourney: { pill: "border-ink bg-retro-pink text-ink", glow: "rgba(255,139,209,0.18)", icon: "M" },
+  "Stable Diffusion": { pill: "border-ink bg-retro-coral text-ink", glow: "rgba(255,107,87,0.18)", icon: "S" },
+  Claude: { pill: "border-ink bg-retro-yellow text-ink", glow: "rgba(255,216,77,0.18)", icon: "C" },
+  Gemini: { pill: "border-ink bg-retro-cyan text-ink", glow: "rgba(116,215,255,0.18)", icon: "G" },
+  "Agent Workflow": { pill: "border-ink bg-retro-grape text-ink", glow: "rgba(143,124,255,0.18)", icon: "A" },
+  Automation: { pill: "border-ink bg-retro-cyan text-ink", glow: "rgba(116,215,255,0.18)", icon: "AU" },
   "Code Generation": { pill: "border-ink bg-retro-lime text-ink", glow: "rgba(185,255,102,0.18)", icon: "CG" },
-  Writing:           { pill: "border-ink bg-retro-coral text-ink", glow: "rgba(255,107,87,0.18)", icon: "W" },
-  Marketing:         { pill: "border-ink bg-retro-pink text-ink", glow: "rgba(255,139,209,0.18)", icon: "MK" },
-  SEO:               { pill: "border-ink bg-retro-lime text-ink", glow: "rgba(185,255,102,0.18)", icon: "SEO" },
-  "Data Analysis":   { pill: "border-ink bg-retro-cyan text-ink", glow: "rgba(116,215,255,0.18)", icon: "DA" },
-  Other:             { pill: "border-cream/60 bg-cream/10 text-cream", glow: "rgba(255,244,214,0.1)", icon: "OT" },
+  Writing: { pill: "border-ink bg-retro-coral text-ink", glow: "rgba(255,107,87,0.18)", icon: "W" },
+  Marketing: { pill: "border-ink bg-retro-pink text-ink", glow: "rgba(255,139,209,0.18)", icon: "MK" },
+  SEO: { pill: "border-ink bg-retro-lime text-ink", glow: "rgba(185,255,102,0.18)", icon: "SEO" },
+  "Data Analysis": { pill: "border-ink bg-retro-cyan text-ink", glow: "rgba(116,215,255,0.18)", icon: "DA" },
+  Other: { pill: "border-cream/60 bg-cream/10 text-cream", glow: "rgba(255,244,214,0.1)", icon: "OT" },
 };
 
 function getAccent(category: string) {
@@ -155,26 +157,49 @@ export default function LibraryPage() {
   const { account, connected } = useWallet();
   const [prompts, setPrompts] = useState<PromptMetadata[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [activeCategory, setActiveCategory] = useState<string>("All");
   const [search, setSearch] = useState("");
 
   useEffect(() => {
+    let cancelled = false;
+
     async function load() {
-      if (!account?.address) return;
+      if (!account?.address) {
+        if (!cancelled) setLoading(false);
+        return;
+      }
+
+      setLoading(true);
+      setError(null);
       try {
         const ids = await getUserUnlockedPrompts(account.address.toString());
         const metadatas = await Promise.all(
           ids.map((id) => getPromptMetadata(id).catch(() => null))
         );
-        setPrompts(metadatas.filter((m): m is PromptMetadata => m !== null));
-      } catch (err) {
-        console.error("Failed to load library:", err);
+        if (!cancelled) {
+          setPrompts(metadatas.filter((m): m is PromptMetadata => m !== null));
+        }
+      } catch (err: unknown) {
+        if (!cancelled) {
+          setPrompts([]);
+          setError(
+            isRateLimitError(err)
+              ? "Aptos is rate limiting your library request. Wait a moment, then retry."
+              : getErrorMessage(err, "Your library could not be loaded.")
+          );
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     }
     load();
-  }, [account?.address]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [account?.address, loadAttempt]);
 
   // Unique categories present in library
   const categories = useMemo(() => {
@@ -213,9 +238,6 @@ export default function LibraryPage() {
 
   return (
     <div className="relative min-h-screen">
-      <div aria-hidden className="absolute right-0 top-14 h-14 w-1/2 -rotate-2 border-y-2 border-l-2 border-ink bg-retro-pink/55" />
-      <div aria-hidden className="absolute bottom-16 left-0 h-12 w-1/3 rotate-2 border-y-2 border-r-2 border-ink bg-retro-mint/55" />
-
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
 
         {/* ── Page header ─────────────────────── */}
@@ -261,7 +283,7 @@ export default function LibraryPage() {
                 <button
                   key={cat}
                   onClick={() => setActiveCategory(cat)}
-                  className={`rounded-[7px] border-2 px-3.5 py-1.5 text-xs font-black uppercase tracking-wide transition-all duration-150 ${isActive
+                  className={`min-h-11 rounded-[7px] border-2 px-3.5 py-2 text-xs font-black uppercase tracking-wide transition-all duration-150 ${isActive
                     ? "border-ink bg-retro-yellow text-ink shadow-neo-sm"
                     : "border-cream/15 bg-cream/[0.04] text-cream/45 hover:border-cream/50 hover:text-cream"
                     }`}
@@ -292,6 +314,14 @@ export default function LibraryPage() {
               <SkeletonCard key={i} isLarge={i % 5 === 1 || i % 5 === 4} />
             ))}
           </div>
+        ) : error ? (
+          <Alert className="p-6">
+            <AlertTitle>Library could not be loaded</AlertTitle>
+            <AlertDescription className="mb-4">{error}</AlertDescription>
+            <Button onClick={() => setLoadAttempt((attempt) => attempt + 1)} size="sm" variant="outline">
+              Retry
+            </Button>
+          </Alert>
         ) : prompts.length === 0 ? (
           /* ── Empty state ──────────────────────── */
           <div className="flex flex-col items-center justify-center py-24 text-center">
