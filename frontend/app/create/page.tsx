@@ -450,37 +450,57 @@ export default function CreatePage() {
 
                 {/* Right side Start - Live Preview */}
                 <div className="hidden lg:block relative">
-                    <div className="sticky top-24">
-                        <h3 className="mb-6 flex items-center gap-2 text-xs font-black uppercase tracking-widest text-cream/45">
+                    <div className="sticky top-24 ml-auto mr-12 max-w-md">
+                        <h3 className="mb-6 flex items-center justify-center gap-2 text-center text-xs font-black uppercase tracking-widest text-cream/45">
                             <Eye className="h-4 w-4" />
                             Live Preview
                         </h3>
-                        <Card className="ml-auto mr-12 max-w-sm rotate-1 bg-cream/[0.1] p-6 transition-transform duration-200 hover:rotate-0">
-                            <div className="flex items-start justify-between mb-4">
-                                <Badge variant="default">{form.category || "Category"}</Badge>
-                                <div className="text-right">
-                                    <div className="text-2xl font-black text-retro-yellow">
-                                        {form.price || "0"} APT
-                                    </div>
-                                    <div className="text-xs font-black uppercase tracking-wide text-cream/45">
-                                        {form.pricingModel.replace(/-/g, " ")}
+                        <Card className="w-full rotate-1 bg-cream/[0.1] p-0 transition-transform duration-200 hover:rotate-0">
+                            <div className="border-b-2 border-ink bg-cream/[0.055] p-5">
+                                <div className="flex items-start justify-between gap-4">
+                                    <Badge variant="default" className="max-w-[12rem] truncate">
+                                        {form.category || "Category"}
+                                    </Badge>
+                                    <div className="shrink-0 text-right">
+                                        <div className="whitespace-nowrap text-2xl font-black leading-none text-retro-yellow">
+                                            {form.price || "0"} APT
+                                        </div>
+                                        <div className="mt-1 max-w-32 truncate text-xs font-black uppercase tracking-wide text-cream/45">
+                                            {form.pricingModel.replace(/-/g, " ")}
+                                        </div>
                                     </div>
                                 </div>
                             </div>
 
-                            <h3 className="mb-2 min-h-[56px] font-display text-xl font-black text-cream line-clamp-2">
-                                {form.title || "Your Prompt Title"}
-                            </h3>
-                            <p className="mb-6 min-h-[40px] text-sm font-semibold text-cream/60 line-clamp-2">
-                                {form.description || "A brief description of what this prompt does and how to use it..."}
-                            </p>
+                            <div className="space-y-4 p-5">
+                                <div>
+                                    <h3 className="min-h-[48px] break-words font-display text-lg font-black leading-tight text-cream line-clamp-2">
+                                        {form.title || "Your Prompt Title"}
+                                    </h3>
+                                    <p className="mt-2 min-h-[40px] break-words text-xs font-semibold leading-relaxed text-cream/55 line-clamp-2">
+                                        {form.description || "A brief description of what this prompt does and how to use it..."}
+                                    </p>
+                                </div>
 
-                            <div className="flex items-center justify-between border-t border-cream/15 pt-4">
-                                <span className="font-mono text-xs text-cream/45">
-                                    by {account?.address ? `${account.address.substring(0, 6)}...${account.address.substring(account.address.length - 4)}` : "you"}
-                                </span>
-                                <div className="flex gap-2">
-                                    <span className="rounded-[5px] border border-cream/20 bg-cream/[0.08] px-2 py-1 text-xs font-black uppercase text-cream/55">
+                                <div className="overflow-hidden rounded-[7px] border-2 border-ink bg-surface-0/85 shadow-neo-sm backdrop-blur-xl">
+                                    <div className="flex items-center justify-between gap-3 border-b-2 border-ink bg-retro-yellow px-3 py-2 text-ink">
+                                        <p className="text-[10px] font-black uppercase tracking-widest">
+                                            Prompt Content
+                                        </p>
+                                        <span className="rounded-[4px] border border-ink/40 px-1.5 py-0.5 font-mono text-[9px] font-black uppercase">
+                                            Preview
+                                        </span>
+                                    </div>
+                                    <p className="min-h-[190px] whitespace-pre-wrap break-words p-4 font-mono text-[13px] font-semibold leading-6 text-cream/78 line-clamp-[10]">
+                                        {form.content.trim() || "Write the actual prompt content here. This preview is the main buyer-facing material, so it should feel substantial and easy to scan."}
+                                    </p>
+                                </div>
+
+                                <div className="flex items-center justify-between gap-3 border-t border-cream/15 pt-4">
+                                    <span className="min-w-0 truncate font-mono text-xs text-cream/45">
+                                        by {account?.address ? `${account.address.substring(0, 6)}...${account.address.substring(account.address.length - 4)}` : "you"}
+                                    </span>
+                                    <span className="max-w-[9rem] shrink-0 truncate rounded-[5px] border border-cream/20 bg-cream/[0.08] px-2 py-1 text-xs font-black uppercase text-cream/55">
                                         {form.category}
                                     </span>
                                 </div>
