@@ -19,7 +19,6 @@ export function WalletProvider({ children }: { children: ReactNode }) {
             autoConnect={true}
             dappConfig={{
                 network: networkMap[NETWORK] || Network.TESTNET,
-                aptosApiKey: process.env.NEXT_PUBLIC_APTOS_API_KEY,
             }}
             onError={(error) => {
                 console.error("Wallet error:", error);

@@ -1,64 +1,80 @@
-/// Hook: Fetch prompt listings (using on-chain events via Aptos REST node API)
+/// Hook: Fetch prompt listings via cached local API route
 
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { getPromptMetadata } from "@/lib/contracts";
-import { MODULE_ADDRESS } from "@/lib/constants";
 import type { PromptMetadata } from "@/types";
+import { getErrorMessage, isRateLimitError } from "@/lib/utils";
+
+const CACHE_TTL_MS = 30_000;
+
+type RegistryLoadResult = {
+    prompts: PromptMetadata[];
+    stale?: boolean;
+};
+
+type RegistryPayload = {
+    prompts?: PromptMetadata[];
+    stale?: boolean;
+    error?: string;
+};
+
+let browserCache:
+    | {
+          prompts: PromptMetadata[];
+          timestamp: number;
+      }
+    | null = null;
+let browserInFlight: Promise<RegistryLoadResult> | null = null;
+
+async function loadPromptRegistry(force = false): Promise<RegistryLoadResult> {
+    if (
+        !force &&
+        browserCache &&
+        Date.now() - browserCache.timestamp < CACHE_TTL_MS
+    ) {
+        return { prompts: browserCache.prompts };
+    }
+    if (!force && browserInFlight) return browserInFlight;
+
+    browserInFlight = fetch("/api/v1/registry", { cache: "no-store" })
+        .then(async (response) => {
+            const payload = (await response.json().catch(() => ({}))) as RegistryPayload;
+            if (!response.ok) {
+                throw new Error(
+                    payload?.error || `HTTP ${response.status}: ${response.statusText}`
+                );
+            }
+            return {
+                prompts: payload.prompts ?? [],
+                stale: payload.stale,
+            };
+        })
+        .then((result) => {
+            const prompts = result.prompts;
+            browserCache = { prompts, timestamp: Date.now() };
+            return result;
+        })
+        .finally(() => {
+            browserInFlight = null;
+        });
+
+    return browserInFlight;
+}
 
 export function usePromptRegistry(category?: string) {
     const [prompts, setPrompts] = useState<PromptMetadata[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [stale, setStale] = useState(false);
 
-    const fetchPrompts = useCallback(async () => {
+    const fetchPrompts = useCallback(async (force = false) => {
         setLoading(true);
         setError(null);
 
         try {
-            // Aptos Indexer v2 has no events table. The only way to query #[event] module
-            // events is via the REST node API — each transaction response includes an `events[]`
-            // array. We scan account transactions for MODULE_ADDRESS, then filter client-side.
-            const eventsTarget = `${MODULE_ADDRESS}::prompt_registry::PromptRegistered`;
-            const { APTOS_NODE_URL, APTOS_API_KEY } = await import("@/lib/constants");
-            const headers: HeadersInit = APTOS_API_KEY
-                ? { Authorization: `Bearer ${APTOS_API_KEY}` }
-                : {};
-
-            // Fetch up to 500 recent transactions for the module account
-            const txResp = await fetch(
-                `${APTOS_NODE_URL}/accounts/${MODULE_ADDRESS}/transactions?limit=500`,
-                { headers }
-            );
-            if (!txResp.ok) {
-                throw new Error(`HTTP ${txResp.status}: ${txResp.statusText}`);
-            }
-            const txns: any[] = await txResp.json();
-
-            // Extract PromptRegistered events from each transaction
-            const events: any[] = txns.flatMap((tx: any) =>
-                (tx.events ?? []).filter((e: any) => e.type === eventsTarget)
-            );
-
-            // Extract prompt IDs from events
-            const promptIds: string[] = events.map(
-                (event: any) => event.data.prompt_id
-            );
-
-            // Deduplicate
-            const uniqueIds = Array.from(new Set(promptIds));
-
-            // Fetch full metadata for each
-            const metadatas = await Promise.all(
-                uniqueIds.map((id) =>
-                    getPromptMetadata(id).catch(() => null)
-                )
-            );
-
-            let filtered = metadatas.filter(
-                (m): m is PromptMetadata => m !== null && m.status === "active"
-            );
+            const result = await loadPromptRegistry(force);
+            let filtered = result.prompts;
 
             // Category filter
             if (category) {
@@ -66,9 +82,14 @@ export function usePromptRegistry(category?: string) {
             }
 
             setPrompts(filtered);
-        } catch (err: any) {
-            console.error("Failed to fetch prompts:", err);
-            setError(err?.message || "Failed to load prompts");
+            setStale(Boolean(result.stale));
+        } catch (err: unknown) {
+            setStale(false);
+            setError(
+                isRateLimitError(err)
+                    ? "Aptos is rate limiting registry requests. Wait a moment, then retry."
+                    : getErrorMessage(err, "Failed to load prompts")
+            );
         } finally {
             setLoading(false);
         }
@@ -82,6 +103,7 @@ export function usePromptRegistry(category?: string) {
         prompts,
         loading,
         error,
-        refresh: fetchPrompts,
+        stale,
+        refresh: () => fetchPrompts(true),
     };
 }

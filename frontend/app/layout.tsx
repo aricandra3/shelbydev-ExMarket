@@ -33,11 +33,12 @@ export default function RootLayout({
 }) {
     return (
         <html lang="en" className={`dark ${inter.variable} ${outfit.variable}`}>
-            <body className="min-h-screen flex flex-col font-sans bg-surface-0 text-white antialiased relative">
-                {/* Background Noise Texture */}
-                <div className="fixed inset-0 w-full h-full bg-noise mix-blend-overlay" />
-                {/* Subtle Primary Glow positioned top center */}
-                <div className="fixed top-[-20%] left-[-10%] w-[120%] h-[60%] rounded-full bg-hero-glow blur-[120px] pointer-events-none opacity-50 z-[-1]" />
+            <body className="relative flex min-h-screen flex-col overflow-x-hidden bg-retro-paper font-sans text-cream antialiased">
+                <div aria-hidden className="fixed inset-0 w-full h-full bg-noise mix-blend-overlay" />
+                <div
+                    aria-hidden
+                    className="fixed inset-x-0 top-0 h-28 border-b-2 border-ink bg-cream/[0.04] backdrop-blur-xl pointer-events-none"
+                />
 
                 <div className="relative z-10 flex flex-col min-h-screen">
                     <WalletProvider>

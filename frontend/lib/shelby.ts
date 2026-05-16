@@ -17,7 +17,7 @@ import {
     expectedTotalChunksets,
 } from "@shelby-protocol/sdk/browser";
 
-import { SHELBY_RPC_URL, NETWORK, SHELBY_API_KEY } from "./constants";
+import { NETWORK } from "./constants";
 
 // ─────────────────────────────────────────────────
 // Shelby Client
@@ -25,7 +25,6 @@ import { SHELBY_RPC_URL, NETWORK, SHELBY_API_KEY } from "./constants";
 
 const shelbyClient = new ShelbyClient({
     network: NETWORK === "shelbynet" ? ("shelbynet" as any) : Network.TESTNET,
-    apiKey: SHELBY_API_KEY || undefined,
 });
 
 export {

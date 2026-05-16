@@ -4,6 +4,7 @@
 
 import { useState, useCallback } from "react";
 import { shelbyService } from "@/lib/shelby";
+import { getErrorMessage } from "@/lib/utils";
 
 export function useShelbyBlob() {
     const [uploading, setUploading] = useState(false);
@@ -17,8 +18,8 @@ export function useShelbyBlob() {
         try {
             await shelbyService.putBlobDirectly(content, address, blobName);
             return `${address}/${blobName}`;
-        } catch (err: any) {
-            setError(err?.message || "Upload failed");
+        } catch (err: unknown) {
+            setError(getErrorMessage(err, "Upload failed"));
             return null;
         } finally {
             setUploading(false);
@@ -32,8 +33,8 @@ export function useShelbyBlob() {
         try {
             const content = await shelbyService.readPrompt(blobId);
             return content;
-        } catch (err: any) {
-            setError(err?.message || "Read failed");
+        } catch (err: unknown) {
+            setError(getErrorMessage(err, "Read failed"));
             return null;
         } finally {
             setReading(false);

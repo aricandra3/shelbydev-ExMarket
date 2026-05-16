@@ -7,31 +7,35 @@ import Link from "next/link";
 import { useWallet } from "@aptos-labs/wallet-adapter-react";
 import { getUserUnlockedPrompts, getPromptMetadata } from "@/lib/contracts";
 import { formatApt } from "@/lib/constants";
+import { getErrorMessage, isRateLimitError } from "@/lib/utils";
 import type { PromptMetadata } from "@/types";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Archive, ArrowRight, LockKeyhole, Search, X } from "lucide-react";
 
 // ── Category → accent colour map ─────────────────────────────────────
 const CATEGORY_COLORS: Record<string, { pill: string; glow: string; icon: string }> = {
-  ChatGPT:          { pill: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",   glow: "rgba(16,185,129,0.12)", icon: "💬" },
-  Midjourney:       { pill: "bg-pink-500/15 text-pink-300 border-pink-500/30",            glow: "rgba(236,72,153,0.12)", icon: "🎨" },
-  "Stable Diffusion":{ pill: "bg-orange-500/15 text-orange-300 border-orange-500/30",    glow: "rgba(249,115,22,0.12)", icon: "🖼️" },
-  Claude:           { pill: "bg-amber-500/15 text-amber-300 border-amber-500/30",         glow: "rgba(245,158,11,0.12)", icon: "⚡" },
-  Gemini:           { pill: "bg-blue-500/15 text-blue-300 border-blue-500/30",            glow: "rgba(59,130,246,0.12)", icon: "✨" },
-  "Agent Workflow": { pill: "bg-violet-500/15 text-violet-300 border-violet-500/30",      glow: "rgba(139,92,246,0.12)", icon: "🤖" },
-  Automation:       { pill: "bg-sky-500/15 text-sky-300 border-sky-500/30",               glow: "rgba(14,165,233,0.12)", icon: "⚙️" },
-  "Code Generation":{ pill: "bg-green-500/15 text-green-300 border-green-500/30",         glow: "rgba(34,197,94,0.12)",  icon: "🧑‍💻" },
-  Writing:          { pill: "bg-rose-500/15 text-rose-300 border-rose-500/30",            glow: "rgba(244,63,94,0.12)",  icon: "✍️" },
-  Marketing:        { pill: "bg-fuchsia-500/15 text-fuchsia-300 border-fuchsia-500/30",   glow: "rgba(217,70,239,0.12)", icon: "📢" },
-  SEO:              { pill: "bg-lime-500/15 text-lime-300 border-lime-500/30",             glow: "rgba(132,204,22,0.12)", icon: "🔍" },
-  "Data Analysis":  { pill: "bg-cyan-500/15 text-cyan-300 border-cyan-500/30",            glow: "rgba(6,182,212,0.12)",  icon: "📊" },
-  Other:            { pill: "bg-white/10 text-white/50 border-white/10",                  glow: "rgba(255,255,255,0.06)", icon: "📁" },
+  ChatGPT: { pill: "border-ink bg-retro-mint text-ink", glow: "rgba(143,240,194,0.18)", icon: "C" },
+  Midjourney: { pill: "border-ink bg-retro-pink text-ink", glow: "rgba(255,139,209,0.18)", icon: "M" },
+  "Stable Diffusion": { pill: "border-ink bg-retro-coral text-ink", glow: "rgba(255,107,87,0.18)", icon: "S" },
+  Claude: { pill: "border-ink bg-retro-yellow text-ink", glow: "rgba(255,216,77,0.18)", icon: "C" },
+  Gemini: { pill: "border-ink bg-retro-cyan text-ink", glow: "rgba(116,215,255,0.18)", icon: "G" },
+  "Agent Workflow": { pill: "border-ink bg-retro-grape text-ink", glow: "rgba(143,124,255,0.18)", icon: "A" },
+  Automation: { pill: "border-ink bg-retro-cyan text-ink", glow: "rgba(116,215,255,0.18)", icon: "AU" },
+  "Code Generation": { pill: "border-ink bg-retro-lime text-ink", glow: "rgba(185,255,102,0.18)", icon: "CG" },
+  Writing: { pill: "border-ink bg-retro-coral text-ink", glow: "rgba(255,107,87,0.18)", icon: "W" },
+  Marketing: { pill: "border-ink bg-retro-pink text-ink", glow: "rgba(255,139,209,0.18)", icon: "MK" },
+  SEO: { pill: "border-ink bg-retro-lime text-ink", glow: "rgba(185,255,102,0.18)", icon: "SEO" },
+  "Data Analysis": { pill: "border-ink bg-retro-cyan text-ink", glow: "rgba(116,215,255,0.18)", icon: "DA" },
+  Other: { pill: "border-cream/60 bg-cream/10 text-cream", glow: "rgba(255,244,214,0.1)", icon: "OT" },
 };
 
 function getAccent(category: string) {
   return CATEGORY_COLORS[category] ?? CATEGORY_COLORS["Other"];
 }
-
-// ── Masonry card heights — vary per card for visual rhythm ────────────
-const CARD_SIZE_CLASSES = ["", "md:row-span-1", ""];
 
 // ── Single prompt card ────────────────────────────────────────────────
 function PromptCard({ prompt, index }: { prompt: PromptMetadata; index: number }) {
@@ -41,22 +45,13 @@ function PromptCard({ prompt, index }: { prompt: PromptMetadata; index: number }
   return (
     <Link
       href={`/prompt/${prompt.promptId}`}
-      className={`group relative rounded-2xl overflow-hidden transition-all duration-500 ease-out flex flex-col
+      className={`group glass-card-hover relative flex flex-col overflow-hidden
         ${isLarge ? "md:row-span-2" : ""}
-        hover:-translate-y-1`}
-      style={{
-        background: "rgba(255,255,255,0.04)",
-        backdropFilter: "blur(24px) saturate(180%)",
-        WebkitBackdropFilter: "blur(24px) saturate(180%)",
-        border: "1px solid rgba(255,255,255,0.07)",
-        boxShadow: `inset 0 1px 0 0 rgba(255,255,255,0.06),
-          0 8px 32px 0 rgba(0,0,0,0.5),
-          0 0 0 1px rgba(0,0,0,0.15)`,
-      }}
+        `}
     >
       {/* Hover coloured glow layer */}
       <div
-        className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none rounded-2xl"
+        className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-200 group-hover:opacity-100"
         style={{
           background: `radial-gradient(ellipse at 50% 0%, ${accent.glow} 0%, transparent 70%)`,
         }}
@@ -64,35 +59,37 @@ function PromptCard({ prompt, index }: { prompt: PromptMetadata; index: number }
 
       {/* Top shimmer line */}
       <div
-        className="absolute top-0 left-0 right-0 h-px opacity-0 group-hover:opacity-100 transition-opacity duration-500"
+        className="absolute left-0 right-0 top-0 h-1 opacity-0 transition-opacity duration-200 group-hover:opacity-100"
         style={{
-          background: `linear-gradient(90deg, transparent 0%, ${accent.glow.replace("0.12", "0.6")} 50%, transparent 100%)`,
+          background: `linear-gradient(90deg, transparent 0%, ${accent.glow.replace("0.18", "0.7")} 50%, transparent 100%)`,
         }}
       />
 
       {/* Frosted inner gradient */}
-      <div className="absolute inset-0 bg-gradient-to-br from-white/[0.03] to-transparent pointer-events-none" />
+      <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-cream/[0.08] to-transparent" />
 
       {/* Card content */}
       <div className="relative z-10 p-5 flex flex-col h-full gap-3">
 
         {/* Header row — icon + category badge */}
         <div className="flex items-start justify-between gap-2">
-          <span className="text-2xl leading-none select-none">{accent.icon}</span>
-          <span className={`inline-flex items-center px-2.5 py-1 rounded-md text-[9px] font-mono uppercase tracking-widest border ${accent.pill}`}>
+          <span className="flex min-h-9 min-w-9 items-center justify-center rounded-[6px] border-2 border-ink bg-retro-yellow px-1 text-xs font-black leading-none text-ink shadow-neo-sm select-none">
+            {accent.icon}
+          </span>
+          <span className={`inline-flex items-center rounded-[5px] border-2 px-2.5 py-1 text-[9px] font-black uppercase tracking-widest ${accent.pill}`}>
             {prompt.category}
           </span>
         </div>
 
         {/* Title */}
-        <h3 className={`font-semibold text-white leading-tight group-hover:text-white transition-colors duration-300
+        <h3 className={`font-display font-black leading-tight text-cream transition-colors duration-200
           ${isLarge ? "text-lg" : "text-base"} line-clamp-3`}>
           {prompt.title}
         </h3>
 
         {/* Description — only shown on large cards */}
         {isLarge && (
-          <p className="text-sm text-white/40 leading-relaxed line-clamp-3 flex-grow">
+          <p className="flex-grow text-sm font-semibold leading-relaxed text-cream/55 line-clamp-3">
             {prompt.description}
           </p>
         )}
@@ -103,7 +100,7 @@ function PromptCard({ prompt, index }: { prompt: PromptMetadata; index: number }
             {prompt.tags.slice(0, isLarge ? 4 : 2).map((tag) => (
               <span
                 key={tag}
-                className="px-2 py-0.5 rounded text-[9px] font-mono text-white/30 border border-white/[0.06] bg-white/[0.03]"
+                className="rounded-[5px] border border-cream/20 bg-cream/[0.06] px-2 py-0.5 font-mono text-[9px] text-cream/40"
               >
                 #{tag}
               </span>
@@ -112,12 +109,12 @@ function PromptCard({ prompt, index }: { prompt: PromptMetadata; index: number }
         )}
 
         {/* Footer — price strip + unlock badge */}
-        <div className="flex items-center justify-between pt-3 border-t border-white/[0.06]">
-          <span className="text-xs text-white/30 font-mono">
+        <div className="flex items-center justify-between border-t border-cream/10 pt-3">
+          <span className="font-mono text-xs font-black text-retro-yellow">
             {formatApt(prompt.price)} APT
           </span>
-          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[9px] font-mono uppercase tracking-widest border border-emerald-500/30 bg-emerald-500/10 text-emerald-400">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+          <span className="inline-flex items-center gap-1 rounded-[5px] border-2 border-ink bg-retro-lime px-2.5 py-1 text-[9px] font-black uppercase tracking-widest text-ink">
+            <span className="h-1.5 w-1.5 rounded-full border border-ink bg-ink animate-pulse" />
             Unlocked
           </span>
         </div>
@@ -130,32 +127,26 @@ function PromptCard({ prompt, index }: { prompt: PromptMetadata; index: number }
 function SkeletonCard({ isLarge }: { isLarge: boolean }) {
   return (
     <div
-      className={`rounded-2xl overflow-hidden ${isLarge ? "md:row-span-2" : ""} p-5 space-y-3 animate-pulse`}
-      style={{
-        background: "rgba(255,255,255,0.03)",
-        backdropFilter: "blur(16px)",
-        WebkitBackdropFilter: "blur(16px)",
-        border: "1px solid rgba(255,255,255,0.05)",
-      }}
+      className={`glass-card animate-pulse space-y-3 overflow-hidden p-5 ${isLarge ? "md:row-span-2" : ""}`}
     >
       <div className="flex items-start justify-between">
-        <div className="w-8 h-8 rounded-lg bg-white/[0.05]" />
-        <div className="h-5 w-20 rounded-md bg-white/[0.05]" />
+        <div className="skeleton h-8 w-8" />
+        <div className="skeleton h-5 w-20" />
       </div>
-      <div className="h-5 w-3/4 rounded-lg bg-white/[0.06]" />
+      <div className="skeleton h-5 w-3/4" />
       {isLarge && (
         <>
-          <div className="h-4 w-full rounded-lg bg-white/[0.04]" />
-          <div className="h-4 w-5/6 rounded-lg bg-white/[0.04]" />
+          <div className="skeleton h-4 w-full" />
+          <div className="skeleton h-4 w-5/6" />
         </>
       )}
       <div className="flex gap-1.5 pt-2">
-        <div className="h-4 w-12 rounded bg-white/[0.04]" />
-        <div className="h-4 w-14 rounded bg-white/[0.04]" />
+        <div className="skeleton h-4 w-12" />
+        <div className="skeleton h-4 w-14" />
       </div>
-      <div className="flex justify-between pt-3 border-t border-white/[0.04]">
-        <div className="h-4 w-16 rounded bg-white/[0.04]" />
-        <div className="h-5 w-20 rounded-md bg-emerald-500/10" />
+      <div className="flex justify-between border-t border-cream/10 pt-3">
+        <div className="skeleton h-4 w-16" />
+        <div className="skeleton h-5 w-20" />
       </div>
     </div>
   );
@@ -166,26 +157,49 @@ export default function LibraryPage() {
   const { account, connected } = useWallet();
   const [prompts, setPrompts] = useState<PromptMetadata[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [activeCategory, setActiveCategory] = useState<string>("All");
   const [search, setSearch] = useState("");
 
   useEffect(() => {
+    let cancelled = false;
+
     async function load() {
-      if (!account?.address) return;
+      if (!account?.address) {
+        if (!cancelled) setLoading(false);
+        return;
+      }
+
+      setLoading(true);
+      setError(null);
       try {
         const ids = await getUserUnlockedPrompts(account.address.toString());
         const metadatas = await Promise.all(
           ids.map((id) => getPromptMetadata(id).catch(() => null))
         );
-        setPrompts(metadatas.filter((m): m is PromptMetadata => m !== null));
-      } catch (err) {
-        console.error("Failed to load library:", err);
+        if (!cancelled) {
+          setPrompts(metadatas.filter((m): m is PromptMetadata => m !== null));
+        }
+      } catch (err: unknown) {
+        if (!cancelled) {
+          setPrompts([]);
+          setError(
+            isRateLimitError(err)
+              ? "Aptos is rate limiting your library request. Wait a moment, then retry."
+              : getErrorMessage(err, "Your library could not be loaded.")
+          );
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     }
     load();
-  }, [account?.address]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [account?.address, loadAttempt]);
 
   // Unique categories present in library
   const categories = useMemo(() => {
@@ -208,61 +222,37 @@ export default function LibraryPage() {
   // ── Not connected state ────────────────────────────────────────────
   if (!connected) {
     return (
-      <div className="min-h-[60vh] flex items-center justify-center px-4">
-        {/* Ambient glow blobs */}
-        <div className="absolute inset-0 overflow-hidden pointer-events-none">
-          <div className="absolute top-1/4 left-1/4 w-96 h-96 rounded-full bg-violet-600/10 blur-3xl" />
-          <div className="absolute bottom-1/4 right-1/4 w-96 h-96 rounded-full bg-fuchsia-600/10 blur-3xl" />
-        </div>
-
-        <div
-          className="relative max-w-md w-full rounded-3xl p-10 text-center"
-          style={{
-            background: "rgba(255,255,255,0.04)",
-            backdropFilter: "blur(32px) saturate(160%)",
-            WebkitBackdropFilter: "blur(32px) saturate(160%)",
-            border: "1px solid rgba(255,255,255,0.08)",
-            boxShadow: "inset 0 1px 0 0 rgba(255,255,255,0.06), 0 32px 64px rgba(0,0,0,0.6)",
-          }}
-        >
-          <div className="text-5xl mb-4">🔒</div>
-          <h2 className="text-xl font-semibold text-white mb-2">Wallet Required</h2>
-          <p className="text-sm text-white/40 leading-relaxed">
+      <div className="flex min-h-[60vh] items-center justify-center px-4">
+        <Card className="relative max-w-md p-10 text-center">
+          <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-[8px] border-2 border-ink bg-retro-coral text-ink shadow-neo">
+            <LockKeyhole className="h-9 w-9" />
+          </div>
+          <h2 className="mb-2 font-display text-2xl font-black text-cream">Wallet Required</h2>
+          <p className="text-sm font-semibold leading-relaxed text-cream/55">
             Connect your Aptos wallet to access your personal prompt library.
           </p>
-        </div>
+        </Card>
       </div>
     );
   }
 
   return (
     <div className="relative min-h-screen">
-      {/* ── Page-level ambient glow blobs ───── */}
-      <div className="fixed inset-0 overflow-hidden pointer-events-none -z-10">
-        <div className="absolute -top-40 -left-40 w-[600px] h-[600px] rounded-full bg-violet-700/[0.07] blur-3xl" />
-        <div className="absolute top-1/3 right-0 w-[500px] h-[500px] rounded-full bg-fuchsia-700/[0.06] blur-3xl" />
-        <div className="absolute bottom-0 left-1/3 w-[400px] h-[400px] rounded-full bg-blue-700/[0.06] blur-3xl" />
-      </div>
-
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
 
         {/* ── Page header ─────────────────────── */}
         <div className="mb-10">
           {/* Pill label */}
-          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-white/[0.08] bg-white/[0.04] backdrop-blur text-xs font-mono text-white/40 tracking-widest uppercase mb-4">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+          <Badge variant="secondary" className="mb-4 shadow-neo-sm">
             My Collection
-          </div>
+          </Badge>
 
           <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
             <div>
-              <h1 className="text-4xl md:text-5xl font-display font-semibold text-white leading-none">
-                My{" "}
-                <span className="bg-gradient-to-r from-violet-400 via-fuchsia-300 to-pink-300 bg-clip-text text-transparent">
-                  Library
-                </span>
+              <h1 className="section-title">
+                My Library
               </h1>
-              <p className="text-white/40 text-sm mt-2 font-normal">
+              <p className="mt-3 text-sm font-semibold text-cream/50">
                 {loading ? "Loading your collection…" : `${filtered.length} prompt${filtered.length !== 1 ? "s" : ""} unlocked`}
               </p>
             </div>
@@ -270,22 +260,13 @@ export default function LibraryPage() {
             {/* Search bar */}
             {!loading && prompts.length > 0 && (
               <div className="relative sm:w-72">
-                <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
-                </svg>
-                <input
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-cream/35" />
+                <Input
                   type="text"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   placeholder="Search prompts…"
-                  className="w-full pl-9 pr-4 py-2.5 rounded-xl text-sm transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-violet-500/30"
-                  style={{
-                    background: "rgba(255,255,255,0.04)",
-                    backdropFilter: "blur(12px)",
-                    WebkitBackdropFilter: "blur(12px)",
-                    border: "1px solid rgba(255,255,255,0.08)",
-                    color: "rgba(255,255,255,0.8)",
-                  }}
+                  className="pl-9"
                 />
               </div>
             )}
@@ -302,19 +283,10 @@ export default function LibraryPage() {
                 <button
                   key={cat}
                   onClick={() => setActiveCategory(cat)}
-                  className="px-3.5 py-1.5 rounded-full text-xs font-mono tracking-wide transition-all duration-300 border"
-                  style={{
-                    background: isActive
-                      ? "rgba(139,92,246,0.2)"
-                      : "rgba(255,255,255,0.04)",
-                    backdropFilter: "blur(12px)",
-                    WebkitBackdropFilter: "blur(12px)",
-                    border: isActive
-                      ? "1px solid rgba(139,92,246,0.4)"
-                      : "1px solid rgba(255,255,255,0.06)",
-                    color: isActive ? "#c4b5fd" : "rgba(255,255,255,0.4)",
-                    boxShadow: isActive ? "0 0 12px rgba(139,92,246,0.2)" : "none",
-                  }}
+                  className={`min-h-11 rounded-[7px] border-2 px-3.5 py-2 text-xs font-black uppercase tracking-wide transition-all duration-150 ${isActive
+                    ? "border-ink bg-retro-yellow text-ink shadow-neo-sm"
+                    : "border-cream/15 bg-cream/[0.04] text-cream/45 hover:border-cream/50 hover:text-cream"
+                    }`}
                 >
                   {cat !== "All" && accent ? `${accent.icon} ` : ""}
                   {cat}
@@ -342,36 +314,38 @@ export default function LibraryPage() {
               <SkeletonCard key={i} isLarge={i % 5 === 1 || i % 5 === 4} />
             ))}
           </div>
+        ) : error ? (
+          <Alert className="p-6">
+            <AlertTitle>Library could not be loaded</AlertTitle>
+            <AlertDescription className="mb-4">{error}</AlertDescription>
+            <Button onClick={() => setLoadAttempt((attempt) => attempt + 1)} size="sm" variant="outline">
+              Retry
+            </Button>
+          </Alert>
         ) : prompts.length === 0 ? (
           /* ── Empty state ──────────────────────── */
           <div className="flex flex-col items-center justify-center py-24 text-center">
-            <div
-              className="w-24 h-24 rounded-2xl flex items-center justify-center text-4xl mb-6"
-              style={{
-                background: "rgba(255,255,255,0.04)",
-                backdropFilter: "blur(16px)",
-                border: "1px solid rgba(255,255,255,0.06)",
-              }}
-            >
-              📭
+            <div className="mb-6 flex h-24 w-24 items-center justify-center rounded-[8px] border-2 border-ink bg-retro-yellow text-ink shadow-neo">
+              <Archive className="h-12 w-12" />
             </div>
-            <h2 className="text-xl font-semibold text-white mb-2">Empty library</h2>
-            <p className="text-white/40 text-sm mb-6 max-w-xs leading-relaxed">
+            <h2 className="mb-2 font-display text-2xl font-black text-cream">Empty library</h2>
+            <p className="mb-6 max-w-xs text-sm font-semibold leading-relaxed text-cream/55">
               You haven't unlocked any prompts yet. Head to the marketplace to find your first gem.
             </p>
-            <Link href="/explore" className="btn-primary">
+            <Link href="/explore" className={buttonVariants()}>
               Browse Marketplace
             </Link>
           </div>
         ) : filtered.length === 0 ? (
           /* ── No search results ─────────────────── */
           <div className="flex flex-col items-center justify-center py-24 text-center">
-            <div className="text-4xl mb-4">🔎</div>
-            <p className="text-white/40 text-sm">No prompts match your search.</p>
+            <Search className="mb-4 h-10 w-10 text-retro-yellow" />
+            <p className="text-sm font-semibold text-cream/55">No prompts match your search.</p>
             <button
               onClick={() => { setSearch(""); setActiveCategory("All"); }}
               className="mt-4 btn-ghost text-xs"
             >
+              <X className="h-4 w-4" />
               Clear filters
             </button>
           </div>
@@ -392,41 +366,31 @@ export default function LibraryPage() {
 
         {/* ── Bottom stat bar ──────────────────── */}
         {!loading && prompts.length > 0 && (
-          <div
-            className="mt-12 flex flex-wrap items-center justify-between gap-4 px-6 py-4 rounded-2xl"
-            style={{
-              background: "rgba(255,255,255,0.03)",
-              backdropFilter: "blur(16px)",
-              WebkitBackdropFilter: "blur(16px)",
-              border: "1px solid rgba(255,255,255,0.05)",
-            }}
-          >
+          <Card className="mt-12 flex flex-wrap items-center justify-between gap-4 px-6 py-4">
             <div className="flex flex-wrap gap-6">
               <div>
-                <p className="text-2xl font-semibold text-white">{prompts.length}</p>
-                <p className="text-[10px] font-mono uppercase tracking-widest text-white/30">Total Prompts</p>
+                <p className="text-2xl font-black text-retro-yellow">{prompts.length}</p>
+                <p className="font-mono text-[10px] uppercase tracking-widest text-cream/35">Total Prompts</p>
               </div>
               <div>
-                <p className="text-2xl font-semibold text-white">{categories.length - 1}</p>
-                <p className="text-[10px] font-mono uppercase tracking-widest text-white/30">Categories</p>
+                <p className="text-2xl font-black text-retro-cyan">{categories.length - 1}</p>
+                <p className="font-mono text-[10px] uppercase tracking-widest text-cream/35">Categories</p>
               </div>
               <div>
-                <p className="text-2xl font-semibold text-white">
+                <p className="text-2xl font-black text-retro-mint">
                   {formatApt(prompts.reduce((sum, p) => sum + p.price, 0))}
                 </p>
-                <p className="text-[10px] font-mono uppercase tracking-widest text-white/30">Total Value (APT)</p>
+                <p className="font-mono text-[10px] uppercase tracking-widest text-cream/35">Total Value (APT)</p>
               </div>
             </div>
             <Link
               href="/explore"
-              className="text-xs font-mono text-white/30 hover:text-white/60 transition-colors inline-flex items-center gap-1.5"
+              className="inline-flex items-center gap-1.5 text-xs font-black uppercase tracking-wide text-cream/45 transition-colors hover:text-retro-yellow"
             >
               Explore more prompts
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
-              </svg>
+              <ArrowRight className="h-3.5 w-3.5" />
             </Link>
-          </div>
+          </Card>
         )}
       </div>
     </div>

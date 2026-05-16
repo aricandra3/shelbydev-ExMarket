@@ -5,6 +5,8 @@
 import { useWallet } from "@aptos-labs/wallet-adapter-react";
 import { truncateAddress } from "@/lib/utils";
 import { useState } from "react";
+import { Button } from "@/components/ui/button";
+import { ChevronDown, LogOut, Wallet } from "lucide-react";
 
 export function ConnectButton() {
     const { account, connected, connect, disconnect, wallets } = useWallet();
@@ -15,13 +17,11 @@ export function ConnectButton() {
             <div className="relative">
                 <button
                     onClick={() => setShowMenu(!showMenu)}
-                    className="flex items-center gap-2 px-4 py-2.5 rounded-xl
-                     bg-surface-3 border border-white/[0.08]
-                     text-sm font-medium text-white/80
-                     hover:border-brand-500/30 transition-all duration-200"
+                    className="inline-flex min-h-11 items-center gap-2 rounded-[7px] border-2 border-ink bg-retro-mint px-4 py-2.5 text-sm font-black uppercase tracking-wide text-ink shadow-neo-sm transition-all duration-150 hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none"
                 >
-                    <span className="w-2 h-2 rounded-full bg-accent-green animate-pulse" />
+                    <span className="h-2 w-2 rounded-full border border-ink bg-accent-green animate-pulse" />
                     {truncateAddress(account.address.toString())}
+                    <ChevronDown className="h-4 w-4" />
                 </button>
 
                 {showMenu && (
@@ -30,16 +30,15 @@ export function ConnectButton() {
                             className="fixed inset-0 z-40"
                             onClick={() => setShowMenu(false)}
                         />
-                        <div className="absolute right-0 top-full mt-2 w-48 py-2 z-50
-                            glass-card rounded-xl animate-fade-in">
+                        <div className="absolute right-0 top-full z-50 mt-3 w-52 animate-fade-in glass-card p-2">
                             <button
                                 onClick={() => {
                                     disconnect();
                                     setShowMenu(false);
                                 }}
-                                className="w-full px-4 py-2.5 text-left text-sm text-white/60
-                           hover:text-white hover:bg-white/[0.04] transition-colors"
+                                className="flex min-h-11 w-full items-center gap-2 rounded-[6px] px-3 py-2.5 text-left text-sm font-black uppercase tracking-wide text-cream/70 transition-colors hover:bg-retro-coral hover:text-ink"
                             >
+                                <LogOut className="h-4 w-4" />
                                 Disconnect
                             </button>
                         </div>
@@ -50,16 +49,17 @@ export function ConnectButton() {
     }
 
     return (
-        <button
+        <Button
             onClick={() => {
                 // Connect to the first available wallet
                 if (wallets && wallets.length > 0) {
                     connect(wallets[0].name);
                 }
             }}
-            className="btn-primary"
+            size="sm"
         >
+            <Wallet className="h-4 w-4" />
             Connect Wallet
-        </button>
+        </Button>
     );
 }

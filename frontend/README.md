@@ -28,7 +28,7 @@ Fill in your values. See the [root README](../README.md) for full environment va
 | `NEXT_PUBLIC_APTOS_INDEXER_URL` | Aptos indexer GraphQL URL |
 | `NEXT_PUBLIC_SHELBY_RPC_URL` | Shelby RPC endpoint |
 | `NEXT_PUBLIC_MODULE_ADDRESS` | Deployed ExMarket contract address |
-| `NEXT_PUBLIC_APTOS_API_KEY` | Aptos/Shelby API key |
+| `APTOS_API_KEY` | Server-side Aptos/Shelby API key |
 | `SHELBY_API_KEY` | Server-side Shelby API key (secret) |
 
 ## Shelby SDK

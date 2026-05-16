@@ -12,12 +12,26 @@ import { aptToOctas, PROMPT_CATEGORIES } from "@/lib/constants";
 import { PRICING_MODEL_REVERSE } from "@/types";
 import type { PricingModel } from "@/types";
 import { AccountAddress } from "@aptos-labs/ts-sdk";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { aceEncrypt } from "@/lib/ace";
+import { getErrorMessage } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { CalendarClock, CheckCircle2, Eye, Send, Unlock, Zap } from "lucide-react";
+
+const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
+const MAX_TITLE_LENGTH = 120;
+const MAX_DESCRIPTION_LENGTH = 520;
+const MAX_TAGS_LENGTH = 180;
+const MAX_CONTENT_LENGTH = 12_000;
 
 export default function CreatePage() {
     const router = useRouter();
     const { account, connected, signAndSubmitTransaction } = useWallet();
+    const shouldReduceMotion = useReducedMotion();
 
     const [form, setForm] = useState({
         title: "",
@@ -39,6 +53,25 @@ export default function CreatePage() {
         e.preventDefault();
         if (!connected || !account) return;
 
+        setError("");
+
+        const title = form.title.trim();
+        const description = form.description.trim();
+        const content = form.content;
+        const price = Number(form.price);
+
+        if (!title || !description || !content.trim()) {
+            setStep("error");
+            setError("Title, description, and prompt content are required.");
+            return;
+        }
+
+        if (!Number.isFinite(price) || price <= 0) {
+            setStep("error");
+            setError("Enter a valid APT price greater than 0.");
+            return;
+        }
+
         try {
             setStep("registering");
 
@@ -47,7 +80,7 @@ export default function CreatePage() {
                 .map((t) => t.trim())
                 .filter(Boolean);
 
-            const priceInOctas = aptToOctas(parseFloat(form.price));
+            const priceInOctas = aptToOctas(price);
             const pricingModelNum = PRICING_MODEL_REVERSE[form.pricingModel];
 
             // ─── PHASE 1: Register on-chain with placeholder blob_id ──────────
@@ -57,8 +90,8 @@ export default function CreatePage() {
             const placeholderBlobId = "pending";
             const payload = buildRegisterPromptPayload(
                 placeholderBlobId,
-                form.title,
-                form.description,
+                title,
+                description,
                 form.category,
                 tags,
                 pricingModelNum,
@@ -84,7 +117,7 @@ export default function CreatePage() {
             setStep("uploading");
 
             const blobName = `prompt_${Date.now()}.txt`;
-            const { ciphertextHex, domainHex } = await aceEncrypt(form.content, promptId);
+            const { ciphertextHex, domainHex } = await aceEncrypt(content, promptId);
             const encryptedPayload = JSON.stringify({ ciphertextHex, domainHex });
             const uploadBytes = new TextEncoder().encode(encryptedPayload);
 
@@ -124,7 +157,6 @@ export default function CreatePage() {
                 options: { checkSuccess: true, waitForIndexer: true } as any,
             });
 
-            console.log("Waiting for Shelby indexer to sync...");
             await new Promise((resolve) => setTimeout(resolve, 3000));
 
             // ─── PHASE 5: Upload encrypted blob via Shelby RPC ───────────────
@@ -150,9 +182,8 @@ export default function CreatePage() {
 
             setTxHash(updateResponse.hash);
             setStep("success");
-        } catch (err: any) {
-            console.error(err);
-            setError(err?.message || "Something went wrong");
+        } catch (err: unknown) {
+            setError(getErrorMessage(err, "Something went wrong while publishing."));
             setStep("error");
         }
     };
@@ -160,30 +191,38 @@ export default function CreatePage() {
     // Render early exit for disconnected wallet
     if (!connected) {
         return (
-            <div className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+            <div className="mx-auto max-w-2xl px-4 py-16 sm:px-6 lg:px-8">
                 <motion.div
-                    initial={{ opacity: 0, scale: 0.95 }}
+                    initial={shouldReduceMotion ? { opacity: 1, scale: 1 } : { opacity: 0, scale: 0.95 }}
                     animate={{ opacity: 1, scale: 1 }}
-                    className="glass-card p-12 text-center"
+                    transition={shouldReduceMotion ? { duration: 0 } : { duration: 0.3, ease: EASE }}
                 >
-                    <h2 className="text-xl font-semibold text-white mb-4">
-                        Connect Your Wallet
-                    </h2>
-                    <p className="text-white/40">
-                        Connect your Aptos wallet to start creating prompts.
-                    </p>
+                    <Card className="p-12 text-center">
+                        <Badge variant="warning" className="mb-5 shadow-neo-sm">
+                            Creator Gate
+                        </Badge>
+                        <h2 className="mb-4 font-display text-3xl font-black text-cream">
+                            Connect Your Wallet
+                        </h2>
+                        <p className="font-semibold text-cream/55">
+                            Connect your Aptos wallet to start creating prompts.
+                        </p>
+                    </Card>
                 </motion.div>
             </div>
         );
     }
 
     return (
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-            <div className="mb-8">
-                <h1 className="text-4xl md:text-5xl font-display font-extrabold tracking-tight text-white mb-4">
+        <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
+            <div className="mb-9">
+                <Badge variant="secondary" className="mb-4 shadow-neo-sm">
+                    New Listing
+                </Badge>
+                <h1 className="section-title">
                     Create Prompt
                 </h1>
-                <p className="text-lg text-white/50">
+                <p className="section-subtitle">
                     List your instructions on the decentralized marketplace
                 </p>
             </div>
@@ -195,50 +234,51 @@ export default function CreatePage() {
                         {step === "success" ? (
                             <motion.div
                                 key="success"
-                                initial={{ opacity: 0, scale: 0.95, y: 10 }}
+                                initial={shouldReduceMotion ? { opacity: 1, scale: 1, y: 0 } : { opacity: 0, scale: 0.95, y: 10 }}
                                 animate={{ opacity: 1, scale: 1, y: 0 }}
-                                exit={{ opacity: 0, scale: 0.95, y: -10 }}
-                                transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
-                                className="glass-card p-12 text-center"
+                                exit={shouldReduceMotion ? { opacity: 1, scale: 1, y: 0 } : { opacity: 0, scale: 0.95, y: -10 }}
+                                transition={shouldReduceMotion ? { duration: 0 } : { duration: 0.4, ease: EASE }}
                             >
-                                <div className="text-5xl mb-4">🎉</div>
-                                <h2 className="text-2xl font-bold text-white mb-2">
-                                    Prompt Published!
-                                </h2>
-                                <p className="text-white/50 mb-6">
-                                    Your prompt is now live on the marketplace.
-                                </p>
-                                {txHash && (
-                                    <p className="text-xs text-white/30 font-mono mb-6 break-all">
-                                        tx: {txHash}
+                                <Card className="p-12 text-center">
+                                    <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-[8px] border-2 border-ink bg-retro-lime text-ink shadow-neo">
+                                        <CheckCircle2 className="h-9 w-9" />
+                                    </div>
+                                    <h2 className="mb-2 font-display text-3xl font-black text-cream">
+                                        Prompt Published!
+                                    </h2>
+                                    <p className="mb-6 font-semibold text-cream/55">
+                                        Your prompt is now live on the marketplace.
                                     </p>
-                                )}
-                                <button
-                                    onClick={() => router.push("/dashboard")}
-                                    className="btn-primary"
-                                >
-                                    Go to Dashboard
-                                </button>
+                                    {txHash && (
+                                        <p className="mb-6 break-all font-mono text-xs text-cream/35">
+                                            tx: {txHash}
+                                        </p>
+                                    )}
+                                    <Button onClick={() => router.push("/dashboard")}>
+                                        Go to Dashboard
+                                    </Button>
+                                </Card>
                             </motion.div>
                         ) : (
                             <motion.div
                                 key="form"
-                                initial={{ opacity: 0, y: 20 }}
+                                initial={shouldReduceMotion ? { opacity: 1, y: 0 } : { opacity: 0, y: 20 }}
                                 animate={{ opacity: 1, y: 0 }}
-                                exit={{ opacity: 0, y: -20 }}
-                                transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+                                exit={shouldReduceMotion ? { opacity: 1, y: 0 } : { opacity: 0, y: -20 }}
+                                transition={shouldReduceMotion ? { duration: 0 } : { duration: 0.4, ease: EASE }}
                             >
                                 <form onSubmit={handleSubmit} className="space-y-6">
-                                    <div className="glass-card p-8 space-y-5">
+                                    <Card className="space-y-5 p-8">
                                         {/* Title */}
                                         <div>
-                                            <label className="block text-sm font-medium text-white/60 mb-2">
+                                            <label className="mb-2 block text-xs font-black uppercase tracking-widest text-cream/65">
                                                 Title
                                             </label>
-                                            <input
+                                            <Input
                                                 type="text"
                                                 required
-                                                className="input-field"
+                                                minLength={2}
+                                                maxLength={MAX_TITLE_LENGTH}
                                                 placeholder="e.g. Ultimate SEO Blog Post Generator"
                                                 value={form.title}
                                                 onChange={(e) => setForm({ ...form, title: e.target.value })}
@@ -247,13 +287,13 @@ export default function CreatePage() {
 
                                         {/* Description */}
                                         <div>
-                                            <label className="block text-sm font-medium text-white/60 mb-2">
+                                            <label className="mb-2 block text-xs font-black uppercase tracking-widest text-cream/65">
                                                 Description
                                             </label>
-                                            <textarea
+                                            <Textarea
                                                 required
+                                                maxLength={MAX_DESCRIPTION_LENGTH}
                                                 rows={3}
-                                                className="textarea-field"
                                                 placeholder="Describe what your prompt does and who it's for..."
                                                 value={form.description}
                                                 onChange={(e) =>
@@ -264,7 +304,7 @@ export default function CreatePage() {
 
                                         {/* Category */}
                                         <div>
-                                            <label className="block text-sm font-medium text-white/60 mb-2">
+                                            <label className="mb-2 block text-xs font-black uppercase tracking-widest text-cream/65">
                                                 Category
                                             </label>
                                             <select
@@ -282,12 +322,12 @@ export default function CreatePage() {
 
                                         {/* Tags */}
                                         <div>
-                                            <label className="block text-sm font-medium text-white/60 mb-2">
+                                            <label className="mb-2 block text-xs font-black uppercase tracking-widest text-cream/65">
                                                 Tags (comma-separated)
                                             </label>
-                                            <input
+                                            <Input
                                                 type="text"
-                                                className="input-field"
+                                                maxLength={MAX_TAGS_LENGTH}
                                                 placeholder="e.g. seo, blog, marketing"
                                                 value={form.tags}
                                                 onChange={(e) => setForm({ ...form, tags: e.target.value })}
@@ -296,85 +336,92 @@ export default function CreatePage() {
 
                                         {/* Pricing Model */}
                                         <div>
-                                            <label className="block text-sm font-medium text-white/60 mb-2">
+                                            <label className="mb-2 block text-xs font-black uppercase tracking-widest text-cream/65">
                                                 Pricing Model
                                             </label>
                                             <div className="grid grid-cols-3 gap-3">
                                                 {(
                                                     [
-                                                        { key: "pay-per-unlock", label: "Pay-per-Unlock", icon: "🔓" },
-                                                        { key: "subscription", label: "Subscription", icon: "📅" },
-                                                        { key: "api-pay-per-call", label: "API Pay-per-Call", icon: "⚡" },
+                                                        { key: "pay-per-unlock", label: "Pay-per-Unlock", icon: Unlock },
+                                                        { key: "subscription", label: "Subscription", icon: CalendarClock },
+                                                        { key: "api-pay-per-call", label: "API Pay-per-Call", icon: Zap },
                                                     ] as const
-                                                ).map((model) => (
-                                                    <button
-                                                        key={model.key}
-                                                        type="button"
-                                                        onClick={() =>
-                                                            setForm({ ...form, pricingModel: model.key })
-                                                        }
-                                                        className={`p-3 rounded-xl border text-center transition-all text-xs font-medium ${form.pricingModel === model.key
-                                                            ? "border-primary-500/50 bg-primary-500/10 text-primary-400"
-                                                            : "border-white/[0.06] text-white/40 hover:border-white/[0.12]"
-                                                            }`}
-                                                    >
-                                                        <div className="text-lg mb-1">{model.icon}</div>
-                                                        {model.label}
-                                                    </button>
-                                                ))}
+                                                ).map((model) => {
+                                                    const Icon = model.icon;
+                                                    const isActive = form.pricingModel === model.key;
+                                                    return (
+                                                        <button
+                                                            key={model.key}
+                                                            type="button"
+                                                            aria-pressed={isActive}
+                                                            onClick={() =>
+                                                                setForm({ ...form, pricingModel: model.key })
+                                                            }
+                                                            className={`min-h-24 rounded-[7px] border-2 p-3 text-center text-xs font-black uppercase tracking-wide transition-all ${isActive
+                                                                ? "border-ink bg-retro-cyan text-ink shadow-neo-sm"
+                                                                : "border-cream/20 bg-cream/[0.05] text-cream/45 hover:border-cream/60 hover:text-cream"
+                                                                }`}
+                                                        >
+                                                            <Icon className="mx-auto mb-2 h-5 w-5" />
+                                                            {model.label}
+                                                        </button>
+                                                    );
+                                                })}
                                             </div>
                                         </div>
 
                                         {/* Price */}
                                         <div>
-                                            <label className="block text-sm font-medium text-white/60 mb-2">
+                                            <label className="mb-2 block text-xs font-black uppercase tracking-widest text-cream/65">
                                                 Price (APT)
                                             </label>
-                                            <input
+                                            <Input
                                                 type="number"
                                                 required
                                                 min="0.001"
                                                 step="0.001"
-                                                className="input-field"
+                                                inputMode="decimal"
                                                 placeholder="0.1"
                                                 value={form.price}
                                                 onChange={(e) => setForm({ ...form, price: e.target.value })}
                                             />
                                         </div>
-                                    </div>
+                                    </Card>
 
                                     {/* Prompt Content */}
-                                    <div className="glass-card p-8">
-                                        <label className="block text-sm font-medium text-white/60 mb-2">
+                                    <Card className="p-8">
+                                        <label className="mb-2 block text-xs font-black uppercase tracking-widest text-cream/65">
                                             Prompt Content
                                         </label>
-                                        <textarea
+                                        <Textarea
                                             required
+                                            maxLength={MAX_CONTENT_LENGTH}
                                             rows={12}
-                                            className="textarea-field font-mono text-sm"
+                                            className="font-mono text-sm"
                                             placeholder="Paste your full prompt content here. This will be stored on Shelby and only visible to buyers."
                                             value={form.content}
                                             onChange={(e) => setForm({ ...form, content: e.target.value })}
                                         />
-                                        <p className="text-xs text-white/20 mt-2">
+                                        <p className="mt-3 text-xs font-semibold text-cream/35">
                                             This content is stored on Shelby decentralized storage. It will only
                                             be accessible to users who pay to unlock it.
                                         </p>
-                                    </div>
+                                    </Card>
 
                                     {/* Submit */}
-                                    <button
+                                    <Button
                                         type="submit"
                                         disabled={step === "uploading" || step === "registering"}
-                                        className="btn-primary w-full py-4 text-base relative overflow-hidden flex justify-center"
+                                        className="relative flex w-full overflow-hidden py-4 text-base"
                                     >
+                                        <Send className="h-4 w-4" />
                                         <AnimatePresence mode="popLayout">
                                             <motion.span
                                                 key={step}
-                                                initial={{ y: 20, opacity: 0 }}
+                                                initial={shouldReduceMotion ? { y: 0, opacity: 1 } : { y: 20, opacity: 0 }}
                                                 animate={{ y: 0, opacity: 1 }}
-                                                exit={{ y: -20, opacity: 0 }}
-                                                transition={{ duration: 0.3 }}
+                                                exit={shouldReduceMotion ? { y: 0, opacity: 1 } : { y: -20, opacity: 0 }}
+                                                transition={shouldReduceMotion ? { duration: 0 } : { duration: 0.3 }}
                                                 className="block"
                                             >
                                                 {step === "form" && "Publish Prompt"}
@@ -383,13 +430,14 @@ export default function CreatePage() {
                                                 {step === "error" && "Try Again"}
                                             </motion.span>
                                         </AnimatePresence>
-                                    </button>
+                                    </Button>
 
                                     {error && (
                                         <motion.p
-                                            initial={{ opacity: 0, height: 0 }}
+                                            initial={shouldReduceMotion ? { opacity: 1, height: "auto" } : { opacity: 0, height: 0 }}
                                             animate={{ opacity: 1, height: "auto" }}
-                                            className="text-accent-red text-sm text-center"
+                                            transition={shouldReduceMotion ? { duration: 0 } : undefined}
+                                            className="text-center text-sm font-semibold text-accent-red"
                                         >
                                             {error}
                                         </motion.p>
@@ -402,41 +450,62 @@ export default function CreatePage() {
 
                 {/* Right side Start - Live Preview */}
                 <div className="hidden lg:block relative">
-                    <div className="sticky top-24">
-                        <h3 className="text-sm font-bold text-white/40 tracking-widest uppercase mb-6">
+                    <div className="sticky top-24 ml-auto mr-12 max-w-md">
+                        <h3 className="mb-6 flex items-center justify-center gap-2 text-center text-xs font-black uppercase tracking-widest text-cream/45">
+                            <Eye className="h-4 w-4" />
                             Live Preview
                         </h3>
-                        <div className="glass-card p-6 rotate-1 hover:rotate-0 transition-transform duration-500 max-w-sm ml-auto mr-12 bg-surface-1/80 backdrop-blur-xl border-t border-l border-white/[0.1]">
-                            <div className="flex items-start justify-between mb-4">
-                                <div className="badge-primary">{form.category || "Category"}</div>
-                                <div className="text-right">
-                                    <div className="text-2xl font-bold text-primary-400">
-                                        {form.price || "0"} APT
-                                    </div>
-                                    <div className="text-xs text-white/50 capitalize">
-                                        {form.pricingModel.replace(/-/g, " ")}
+                        <Card className="w-full rotate-1 bg-cream/[0.1] p-0 transition-transform duration-200 hover:rotate-0">
+                            <div className="border-b-2 border-ink bg-cream/[0.055] p-5">
+                                <div className="flex items-start justify-between gap-4">
+                                    <Badge variant="default" className="max-w-[12rem] truncate">
+                                        {form.category || "Category"}
+                                    </Badge>
+                                    <div className="shrink-0 text-right">
+                                        <div className="whitespace-nowrap text-2xl font-black leading-none text-retro-yellow">
+                                            {form.price || "0"} APT
+                                        </div>
+                                        <div className="mt-1 max-w-32 truncate text-xs font-black uppercase tracking-wide text-cream/45">
+                                            {form.pricingModel.replace(/-/g, " ")}
+                                        </div>
                                     </div>
                                 </div>
                             </div>
 
-                            <h3 className="text-xl font-bold text-white mb-2 line-clamp-2 min-h-[56px]">
-                                {form.title || "Your Prompt Title"}
-                            </h3>
-                            <p className="text-sm text-white/60 mb-6 line-clamp-2 min-h-[40px]">
-                                {form.description || "A brief description of what this prompt does and how to use it..."}
-                            </p>
+                            <div className="space-y-4 p-5">
+                                <div>
+                                    <h3 className="min-h-[48px] break-words font-display text-lg font-black leading-tight text-cream line-clamp-2">
+                                        {form.title || "Your Prompt Title"}
+                                    </h3>
+                                    <p className="mt-2 min-h-[40px] break-words text-xs font-semibold leading-relaxed text-cream/55 line-clamp-2">
+                                        {form.description || "A brief description of what this prompt does and how to use it..."}
+                                    </p>
+                                </div>
 
-                            <div className="flex items-center justify-between pt-4 border-t border-white/[0.04]">
-                                <span className="text-xs font-mono text-white/40">
-                                    by {account?.address ? `${account.address.substring(0, 6)}...${account.address.substring(account.address.length - 4)}` : "you"}
-                                </span>
-                                <div className="flex gap-2">
-                                    <span className="text-xs bg-surface-3 px-2 py-1 rounded-md text-white/50">{form.category}</span>
+                                <div className="overflow-hidden rounded-[7px] border-2 border-ink bg-surface-0/85 shadow-neo-sm backdrop-blur-xl">
+                                    <div className="flex items-center justify-between gap-3 border-b-2 border-ink bg-retro-yellow px-3 py-2 text-ink">
+                                        <p className="text-[10px] font-black uppercase tracking-widest">
+                                            Prompt Content
+                                        </p>
+                                        <span className="rounded-[4px] border border-ink/40 px-1.5 py-0.5 font-mono text-[9px] font-black uppercase">
+                                            Preview
+                                        </span>
+                                    </div>
+                                    <p className="min-h-[190px] whitespace-pre-wrap break-words p-4 font-mono text-[13px] font-semibold leading-6 text-cream/78 line-clamp-[10]">
+                                        {form.content.trim() || "Write the actual prompt content here. This preview is the main buyer-facing material, so it should feel substantial and easy to scan."}
+                                    </p>
+                                </div>
+
+                                <div className="flex items-center justify-between gap-3 border-t border-cream/15 pt-4">
+                                    <span className="min-w-0 truncate font-mono text-xs text-cream/45">
+                                        by {account?.address ? `${account.address.substring(0, 6)}...${account.address.substring(account.address.length - 4)}` : "you"}
+                                    </span>
+                                    <span className="max-w-[9rem] shrink-0 truncate rounded-[5px] border border-cream/20 bg-cream/[0.08] px-2 py-1 text-xs font-black uppercase text-cream/55">
+                                        {form.category}
+                                    </span>
                                 </div>
                             </div>
-                        </div>
-                        {/* Decorative glow behind preview */}
-                        <div className="absolute top-20 right-12 w-64 h-64 bg-primary-500/20 blur-[100px] pointer-events-none -z-10" />
+                        </Card>
                     </div>
                 </div>
             </div>

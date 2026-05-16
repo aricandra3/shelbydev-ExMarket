@@ -62,7 +62,7 @@ See [`frontend/.env.example`](frontend/.env.example) for the full list. Key vari
 |---|---|
 | `NEXT_PUBLIC_NETWORK` | `testnet` or `shelbynet` |
 | `NEXT_PUBLIC_MODULE_ADDRESS` | Deployed ExMarket contract address |
-| `NEXT_PUBLIC_APTOS_API_KEY` | Aptos/Shelby API key |
+| `APTOS_API_KEY` | Server-side Aptos/Shelby API key |
 | `SHELBY_API_KEY` | Server-side Shelby API key |
 
 ### Network Presets

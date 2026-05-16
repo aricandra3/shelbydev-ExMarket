@@ -6,7 +6,8 @@ import { useState, useCallback } from "react";
 import { useWallet } from "@aptos-labs/wallet-adapter-react";
 import { aptosClient } from "@/lib/aptos";
 import { buildUnlockPromptPayload, buildPurchaseApiCallsPayload, buildSubscribePayload } from "@/lib/contracts";
-import type { TransactionState, PricingModel } from "@/types";
+import { getErrorMessage } from "@/lib/utils";
+import type { TransactionState } from "@/types";
 
 export function useUnlockPrompt() {
     const { account, signAndSubmitTransaction } = useWallet();
@@ -34,10 +35,10 @@ export function useUnlockPrompt() {
 
                 setTxState({ status: "success", hash: response.hash });
                 return response.hash;
-            } catch (error: any) {
+            } catch (error: unknown) {
                 setTxState({
                     status: "error",
-                    error: error?.message || "Transaction failed",
+                    error: getErrorMessage(error, "Transaction failed"),
                 });
                 return null;
             }
@@ -66,10 +67,10 @@ export function useUnlockPrompt() {
 
                 setTxState({ status: "success", hash: response.hash });
                 return response.hash;
-            } catch (error: any) {
+            } catch (error: unknown) {
                 setTxState({
                     status: "error",
-                    error: error?.message || "Transaction failed",
+                    error: getErrorMessage(error, "Transaction failed"),
                 });
                 return null;
             }
@@ -98,10 +99,10 @@ export function useUnlockPrompt() {
 
                 setTxState({ status: "success", hash: response.hash });
                 return response.hash;
-            } catch (error: any) {
+            } catch (error: unknown) {
                 setTxState({
                     status: "error",
-                    error: error?.message || "Transaction failed",
+                    error: getErrorMessage(error, "Transaction failed"),
                 });
                 return null;
             }
