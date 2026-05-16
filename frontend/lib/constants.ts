@@ -51,10 +51,6 @@ export const MODULES = {
     UNLOCK_HISTORY: `${MODULE_ADDRESS}::unlock_history`,
 } as const;
 
-// ── API Keys ────────────────────────────────────
-export const APTOS_API_KEY = process.env.NEXT_PUBLIC_APTOS_API_KEY || "";
-export const SHELBY_API_KEY = process.env.NEXT_PUBLIC_SHELBY_API_KEY || "";
-
 // ── Platform ────────────────────────────────────
 export const PLATFORM_NAME = "ExMarket";
 export const PLATFORM_FEE_PERCENT = 10;

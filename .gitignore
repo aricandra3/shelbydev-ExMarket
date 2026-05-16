@@ -13,3 +13,8 @@ Thumbs.db
 # Editor settings
 .vscode/
 
+# Environment secrets
+.env
+.env.*
+!.env.example
+!frontend/.env.example

@@ -2,7 +2,7 @@
 /// Configured per: https://docs.shelby.xyz/sdks/typescript/acquire-api-keys
 
 import { Aptos, AptosConfig, Network } from "@aptos-labs/ts-sdk";
-import { NETWORK, APTOS_NODE_URL, APTOS_INDEXER_URL, APTOS_API_KEY } from "./constants";
+import { NETWORK, APTOS_NODE_URL, APTOS_INDEXER_URL } from "./constants";
 import { isRateLimitError } from "./utils";
 
 // ── Network Mapping ─────────────────────────────
@@ -13,13 +13,6 @@ const config = new AptosConfig({
     network: isCustomNetwork ? Network.CUSTOM : Network.TESTNET,
     fullnode: APTOS_NODE_URL,
     indexer: APTOS_INDEXER_URL,
-    ...(APTOS_API_KEY
-        ? {
-            clientConfig: {
-                API_KEY: APTOS_API_KEY,
-            },
-        }
-        : {}),
 });
 
 export const aptosClient = new Aptos(config);

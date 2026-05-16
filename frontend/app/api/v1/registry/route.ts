@@ -2,7 +2,7 @@
 /// Keeps Aptos transaction scans off the browser to reduce 429s in dev and production.
 
 import { NextResponse } from "next/server";
-import { APTOS_API_KEY, APTOS_NODE_URL, MODULE_ADDRESS } from "@/lib/constants";
+import { APTOS_NODE_URL, MODULE_ADDRESS } from "@/lib/constants";
 import { getErrorMessage, isRateLimitError, truncateAddress } from "@/lib/utils";
 import type { PromptMetadata } from "@/types";
 
@@ -11,6 +11,7 @@ export const dynamic = "force-dynamic";
 const CACHE_TTL_MS = 60_000;
 const TRANSACTION_SCAN_LIMIT = 200;
 const RATE_LIMIT_STATUS = 429;
+const APTOS_API_KEY = process.env.APTOS_API_KEY || "";
 
 type AptosEvent = {
     type: string;
