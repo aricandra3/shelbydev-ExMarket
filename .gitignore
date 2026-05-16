@@ -16,5 +16,6 @@ Thumbs.db
 # Environment secrets
 .env
 .env.*
-!.env.example
 !frontend/.env.example
+
+CLAUDE.md
