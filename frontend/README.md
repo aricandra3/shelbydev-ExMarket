@@ -29,6 +29,7 @@ Fill in your values. See the [root README](../README.md) for full environment va
 | `NEXT_PUBLIC_SHELBY_RPC_URL` | Shelby RPC endpoint |
 | `NEXT_PUBLIC_MODULE_ADDRESS` | Deployed ExMarket contract address |
 | `APTOS_API_KEY` | Server-side Aptos/Shelby API key |
+| `APTOS_API_ORIGIN` | Origin allowed by the Aptos API key, e.g. `http://localhost:3000` |
 | `SHELBY_API_KEY` | Server-side Shelby API key (secret) |
 
 ## Shelby SDK
@@ -37,6 +38,22 @@ Fill in your values. See the [root README](../README.md) for full environment va
 
 1. **`@shelby-protocol/sdk`** *(recommended)* — uncomment once you have API access
 2. **REST fallback** — direct HTTP to Shelby RPC (active by default)
+
+## Prompt API Proof
+
+`GET /api/v1/prompt/:id` requires a fresh wallet proof. Sign this exact message:
+
+```text
+ExMarket API prompt access
+Prompt: <prompt_id>
+Wallet: <normalized_wallet_address>
+Timestamp: <unix_ms>
+Nonce: <random_16_to_128_chars>
+```
+
+Send it with `X-Wallet-Address`, `X-Wallet-Public-Key`, `X-Wallet-Signature`,
+`X-Wallet-Message`, `X-Wallet-Timestamp`, and `X-Wallet-Nonce`. Timestamps expire
+after five minutes and nonces are one-time use per wallet and prompt.
 
 ## Deploy Contract
 

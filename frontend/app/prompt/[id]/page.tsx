@@ -47,7 +47,7 @@ export default function PromptDetailPage() {
             setLoading(true);
             setLoadError(null);
             try {
-                const data = await getPromptMetadata(promptId);
+                const data = await getPromptMetadata(promptId, { fresh: true });
                 if (!cancelled) setPrompt(data);
             } catch (err: unknown) {
                 if (!cancelled) {
@@ -130,6 +130,7 @@ export default function PromptDetailPage() {
     useEffect(() => {
         if (txState.status === "success") {
             refreshAccess();
+            setLoadAttempt((attempt) => attempt + 1);
         }
     }, [txState.status, refreshAccess]);
 
@@ -154,6 +155,7 @@ export default function PromptDetailPage() {
     const handleRetryDecrypt = () => {
         setContent(null);
         setDecryptError(null);
+        setLoadAttempt((attempt) => attempt + 1);
         setDecryptAttempt((attempt) => attempt + 1);
     };
 

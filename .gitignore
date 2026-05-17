@@ -17,5 +17,3 @@ Thumbs.db
 .env
 .env.*
 !frontend/.env.example
-
-CLAUDE.md

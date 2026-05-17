@@ -2,16 +2,28 @@
 
 import { viewFunction, buildEntryPayload } from "./aptos";
 import { MODULES, REGISTRY_ADDRESS } from "./constants";
+import {
+    findPromptInRegistry,
+    getCreatorPromptIdsFromRegistry,
+} from "./promptRegistry";
 import type { PromptMetadata, PricingModel, PRICING_MODEL_MAP } from "@/types";
 
 // ── Prompt Registry ─────────────────────────────
 
 export async function getPromptMetadata(
-    promptId: string
+    promptId: string,
+    options: { fresh?: boolean } = {}
 ): Promise<PromptMetadata> {
+    if (!options.fresh && typeof window !== "undefined") {
+        const registryPrompt = await findPromptInRegistry(promptId).catch(() => null);
+        if (registryPrompt) return registryPrompt;
+    }
+
     const result = await viewFunction<any[]>(
         `${MODULES.PROMPT_REGISTRY}::get_prompt_metadata`,
-        [promptId]
+        [promptId],
+        [],
+        { cache: !options.fresh }
     );
 
     const pricingMap: Record<number, PricingModel> = {
@@ -55,11 +67,21 @@ export async function getPromptBlobId(promptId: string): Promise<string> {
 }
 
 export async function getCreatorPrompts(
-    creatorAddr: string
+    creatorAddr: string,
+    options: { fresh?: boolean } = {}
 ): Promise<string[]> {
+    if (!options.fresh && typeof window !== "undefined") {
+        const registryPromptIds = await getCreatorPromptIdsFromRegistry(
+            creatorAddr
+        ).catch(() => null);
+        if (registryPromptIds) return registryPromptIds;
+    }
+
     const result = await viewFunction<[string[]]>(
         `${MODULES.PROMPT_REGISTRY}::get_creator_prompts`,
-        [creatorAddr]
+        [creatorAddr],
+        [],
+        { cache: !options.fresh }
     );
     return result[0];
 }

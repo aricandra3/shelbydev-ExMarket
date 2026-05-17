@@ -6,6 +6,7 @@ import { useState, useCallback } from "react";
 import { useWallet } from "@aptos-labs/wallet-adapter-react";
 import { aptosClient } from "@/lib/aptos";
 import { buildUnlockPromptPayload, buildPurchaseApiCallsPayload, buildSubscribePayload } from "@/lib/contracts";
+import { invalidatePromptRegistryCache } from "@/lib/promptRegistry";
 import { getErrorMessage } from "@/lib/utils";
 import type { TransactionState } from "@/types";
 
@@ -33,6 +34,7 @@ export function useUnlockPrompt() {
                     transactionHash: response.hash,
                 });
 
+                invalidatePromptRegistryCache();
                 setTxState({ status: "success", hash: response.hash });
                 return response.hash;
             } catch (error: unknown) {
@@ -65,6 +67,7 @@ export function useUnlockPrompt() {
                     transactionHash: response.hash,
                 });
 
+                invalidatePromptRegistryCache();
                 setTxState({ status: "success", hash: response.hash });
                 return response.hash;
             } catch (error: unknown) {
@@ -97,6 +100,7 @@ export function useUnlockPrompt() {
                     transactionHash: response.hash,
                 });
 
+                invalidatePromptRegistryCache();
                 setTxState({ status: "success", hash: response.hash });
                 return response.hash;
             } catch (error: unknown) {

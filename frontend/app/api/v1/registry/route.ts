@@ -1,17 +1,22 @@
 /// API Route: Cached prompt marketplace registry
 /// Keeps Aptos transaction scans off the browser to reduce 429s in dev and production.
 
-import { NextResponse } from "next/server";
-import { APTOS_NODE_URL, MODULE_ADDRESS } from "@/lib/constants";
-import { getErrorMessage, isRateLimitError, truncateAddress } from "@/lib/utils";
+import { NextRequest, NextResponse } from "next/server";
+import { APTOS_NODE_URL, MODULE_ADDRESS, MODULES } from "@/lib/constants";
+import { viewFunction } from "@/lib/aptos";
+import { isRateLimitError, truncateAddress } from "@/lib/utils";
 import type { PromptMetadata } from "@/types";
+import { checkRateLimit, rateLimitHeaders } from "@/lib/apiSecurity";
 
 export const dynamic = "force-dynamic";
 
 const CACHE_TTL_MS = 60_000;
 const TRANSACTION_SCAN_LIMIT = 200;
+const METADATA_ENRICH_LIMIT = 80;
+const METADATA_ENRICH_CONCURRENCY = 2;
 const RATE_LIMIT_STATUS = 429;
 const APTOS_API_KEY = process.env.APTOS_API_KEY || "";
+const APTOS_API_ORIGIN = process.env.APTOS_API_ORIGIN || "http://localhost:3000";
 
 type AptosEvent = {
     type: string;
@@ -29,6 +34,12 @@ let cache:
       }
     | null = null;
 let inFlight: Promise<PromptMetadata[]> | null = null;
+
+const pricingMap: Record<number, PromptMetadata["pricingModel"]> = {
+    1: "pay-per-unlock",
+    2: "subscription",
+    3: "api-pay-per-call",
+};
 
 function sleep(ms: number) {
     return new Promise((resolve) => setTimeout(resolve, ms));
@@ -54,18 +65,99 @@ async function fetchWithRetry(url: string, init: RequestInit, retries = 2) {
     throw new Error("Failed to fetch after retry");
 }
 
-async function loadPrompts(): Promise<PromptMetadata[]> {
-    if (cache && Date.now() - cache.timestamp < CACHE_TTL_MS) {
+async function mapWithConcurrency<T, R>(
+    items: T[],
+    limit: number,
+    worker: (item: T) => Promise<R>
+): Promise<R[]> {
+    const results = new Array<R>(items.length);
+    let nextIndex = 0;
+
+    await Promise.all(
+        Array.from({ length: Math.min(limit, items.length) }, async () => {
+            while (nextIndex < items.length) {
+                const currentIndex = nextIndex;
+                nextIndex += 1;
+                results[currentIndex] = await worker(items[currentIndex]);
+            }
+        })
+    );
+
+    return results;
+}
+
+async function enrichPromptMetadata(
+    prompt: PromptMetadata,
+    useCache: boolean
+): Promise<PromptMetadata> {
+    try {
+        const result = await viewFunction<any[]>(
+            `${MODULES.PROMPT_REGISTRY}::get_prompt_metadata`,
+            [prompt.promptId],
+            [],
+            { cache: useCache }
+        );
+
+        return {
+            ...prompt,
+            creator: String(result[0]),
+            blobId: String(result[1]),
+            title: String(result[2]),
+            description: String(result[3]),
+            category: String(result[4]),
+            pricingModel: pricingMap[Number(result[5])] || "pay-per-unlock",
+            price: Number(result[6]),
+            status: Number(result[7]) === 1 ? "active" : "inactive",
+            totalUnlocks: Number(result[8]),
+            totalRevenue: Number(result[9]),
+        };
+    } catch (error) {
+        console.warn(`Prompt metadata enrichment failed for ${prompt.promptId}`, error);
+        return prompt;
+    }
+}
+
+async function enrichRecentPrompts(
+    prompts: PromptMetadata[],
+    useCache: boolean
+): Promise<PromptMetadata[]> {
+    const promptIdsToEnrich = new Set(
+        [...prompts]
+            .sort((a, b) => b.createdAt - a.createdAt)
+            .slice(0, METADATA_ENRICH_LIMIT)
+            .map((prompt) => prompt.promptId)
+    );
+
+    const candidates = prompts.filter((prompt) =>
+        promptIdsToEnrich.has(prompt.promptId)
+    );
+    const enriched = await mapWithConcurrency(
+        candidates,
+        METADATA_ENRICH_CONCURRENCY,
+        (prompt) => enrichPromptMetadata(prompt, useCache)
+    );
+    const enrichedById = new Map(
+        enriched.map((prompt) => [prompt.promptId, prompt])
+    );
+
+    return prompts.map((prompt) => enrichedById.get(prompt.promptId) ?? prompt);
+}
+
+async function loadPrompts(force = false): Promise<PromptMetadata[]> {
+    if (!force && cache && Date.now() - cache.timestamp < CACHE_TTL_MS) {
         return cache.prompts;
     }
-    if (inFlight) return inFlight;
+    if (!force && inFlight) return inFlight;
 
     inFlight = (async () => {
         const registeredTarget = `${MODULE_ADDRESS}::prompt_registry::PromptRegistered`;
         const updatedTarget = `${MODULE_ADDRESS}::prompt_registry::PromptUpdated`;
         const deactivatedTarget = `${MODULE_ADDRESS}::prompt_registry::PromptDeactivated`;
         const headers: HeadersInit = APTOS_API_KEY
-            ? { Authorization: `Bearer ${APTOS_API_KEY}` }
+            ? {
+                  Authorization: `Bearer ${APTOS_API_KEY}`,
+                  Origin: APTOS_API_ORIGIN,
+              }
             : {};
 
         let txResp = await fetchWithRetry(
@@ -135,12 +227,13 @@ async function loadPrompts(): Promise<PromptMetadata[]> {
             });
         });
 
-        const prompts = Array.from(registered.values())
+        const basePrompts = Array.from(registered.values())
             .filter((prompt) => !deactivated.has(prompt.promptId))
             .map((prompt) => ({
                 ...prompt,
                 price: updatedPrices.get(prompt.promptId) ?? prompt.price,
             }));
+        const prompts = await enrichRecentPrompts(basePrompts, !force);
 
         cache = { prompts, timestamp: Date.now() };
         return prompts;
@@ -151,9 +244,23 @@ async function loadPrompts(): Promise<PromptMetadata[]> {
     return inFlight;
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+    const rateLimit = checkRateLimit(req.headers, {
+        namespace: "api-registry",
+        limit: 60,
+        windowMs: 60_000,
+    });
+
+    if (rateLimit.limited) {
+        return NextResponse.json(
+            { error: "Too many registry requests. Please retry shortly." },
+            { status: 429, headers: rateLimitHeaders(rateLimit) }
+        );
+    }
+
     try {
-        const prompts = await loadPrompts();
+        const force = req.nextUrl.searchParams.get("refresh") === "1";
+        const prompts = await loadPrompts(force);
 
         return NextResponse.json(
             {
@@ -162,7 +269,8 @@ export async function GET() {
             },
             {
                 headers: {
-                    "Cache-Control": "private, max-age=30",
+                    ...rateLimitHeaders(rateLimit),
+                    "Cache-Control": force ? "no-store" : "private, max-age=30",
                 },
             }
         );
@@ -179,6 +287,7 @@ export async function GET() {
                 },
                 {
                     headers: {
+                        ...rateLimitHeaders(rateLimit),
                         "Cache-Control": "private, max-age=15",
                     },
                 }
@@ -189,9 +298,12 @@ export async function GET() {
             {
                 error: isRateLimitError(error)
                     ? "Aptos is rate limiting registry requests. Please retry in a few seconds."
-                    : getErrorMessage(error, "Failed to load prompt registry from Aptos"),
+                    : "Unable to load prompt registry right now.",
             },
-            { status: isRateLimitError(error) ? 429 : 502 }
+            {
+                status: isRateLimitError(error) ? 429 : 502,
+                headers: rateLimitHeaders(rateLimit),
+            }
         );
     }
 }

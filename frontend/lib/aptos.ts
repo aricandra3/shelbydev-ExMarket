@@ -8,11 +8,23 @@ import { isRateLimitError } from "./utils";
 // ── Network Mapping ─────────────────────────────
 // "shelbynet" is a custom Aptos network, so we use CUSTOM and provide URLs
 const isCustomNetwork = NETWORK === "shelbynet";
+const APTOS_API_KEY =
+    typeof window === "undefined" ? process.env.APTOS_API_KEY : undefined;
+const APTOS_API_ORIGIN =
+    typeof window === "undefined"
+        ? process.env.APTOS_API_ORIGIN || "http://localhost:3000"
+        : undefined;
 
 const config = new AptosConfig({
     network: isCustomNetwork ? Network.CUSTOM : Network.TESTNET,
     fullnode: APTOS_NODE_URL,
     indexer: APTOS_INDEXER_URL,
+    clientConfig: APTOS_API_KEY
+        ? {
+              API_KEY: APTOS_API_KEY,
+              HEADERS: APTOS_API_ORIGIN ? { Origin: APTOS_API_ORIGIN } : undefined,
+          }
+        : undefined,
 });
 
 export const aptosClient = new Aptos(config);
@@ -70,9 +82,10 @@ async function retryView<T>(task: () => Promise<T>, retries = 2): Promise<T> {
 export async function viewFunction<T>(
     functionName: string,
     args: any[] = [],
-    typeArgs: string[] = []
+    typeArgs: string[] = [],
+    options: { cache?: boolean } = {}
 ): Promise<T> {
-    const cacheable = shouldCacheView(functionName);
+    const cacheable = options.cache !== false && shouldCacheView(functionName);
     const cacheKey = getViewCacheKey(functionName, args, typeArgs);
     const cached = viewCache.get(cacheKey);
 
@@ -86,6 +99,53 @@ export async function viewFunction<T>(
 
     if (cacheable && viewInFlight.has(cacheKey)) {
         return (await viewInFlight.get(cacheKey)) as T;
+    }
+
+    if (typeof window !== "undefined") {
+        const promise = runLimitedView(() =>
+            retryView(async () => {
+                const response = await fetch("/api/v1/view", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        functionName,
+                        args,
+                        typeArgs,
+                        cache: options.cache !== false,
+                    }),
+                    cache: "no-store",
+                });
+
+                const payload = await response.json().catch(() => null);
+                if (!response.ok) {
+                    const message =
+                        payload && typeof payload.error === "string"
+                            ? payload.error
+                            : "Aptos view request failed.";
+                    throw new Error(message);
+                }
+
+                if (!payload || typeof payload !== "object" || !("result" in payload)) {
+                    throw new Error("Aptos view response was invalid.");
+                }
+
+                return payload.result as T;
+            })
+        );
+
+        if (cacheable) {
+            viewInFlight.set(cacheKey, promise);
+        }
+
+        const result = await promise.finally(() => {
+            if (cacheable) viewInFlight.delete(cacheKey);
+        });
+
+        if (cacheable) {
+            viewCache.set(cacheKey, { value: result, timestamp: Date.now() });
+        }
+
+        return result as T;
     }
 
     const promise = runLimitedView(() =>
