@@ -26,7 +26,12 @@ export function getErrorMessage(
 
 export function isRateLimitError(error: unknown): boolean {
     const message = getErrorMessage(error, "").toLowerCase();
-    return message.includes("429") || message.includes("too many requests") || message.includes("rate limit");
+    return (
+        message.includes("429") ||
+        message.includes("too many requests") ||
+        message.includes("rate limit") ||
+        message.includes("per anonymous")
+    );
 }
 
 /// Truncate an address for display: 0x1234...abcd

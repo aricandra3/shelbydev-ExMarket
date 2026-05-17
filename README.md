@@ -63,6 +63,7 @@ See [`frontend/.env.example`](frontend/.env.example) for the full list. Key vari
 | `NEXT_PUBLIC_NETWORK` | `testnet` or `shelbynet` |
 | `NEXT_PUBLIC_MODULE_ADDRESS` | Deployed ExMarket contract address |
 | `APTOS_API_KEY` | Server-side Aptos/Shelby API key |
+| `APTOS_API_ORIGIN` | Origin allowed by your Aptos API key |
 | `SHELBY_API_KEY` | Server-side Shelby API key |
 
 ### Network Presets
@@ -88,7 +89,7 @@ NEXT_PUBLIC_SHELBY_CONTRACT_ADDRESS=0x85fdb9a176ab8ef1d9d9c1b60d60b3924f0800ac1d
 ## Tech Stack
 
 - **Smart Contracts** — Aptos Move
-- **Frontend** — Next.js 14 (App Router), TypeScript, Tailwind CSS
+- **Frontend** — Next.js 15 (App Router), TypeScript, Tailwind CSS
 - **Storage** — [Shelby Protocol](https://docs.shelby.xyz) (decentralized storage on Aptos)
 - **Wallet** — Aptos wallet adapter
 - **Package Manager** — pnpm

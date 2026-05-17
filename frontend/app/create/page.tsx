@@ -32,6 +32,7 @@ export default function CreatePage() {
     const router = useRouter();
     const { account, connected, signAndSubmitTransaction } = useWallet();
     const shouldReduceMotion = useReducedMotion();
+    const accountAddress = account?.address?.toString();
 
     const [form, setForm] = useState({
         title: "",
@@ -105,7 +106,9 @@ export default function CreatePage() {
             });
 
             // Fetch the real prompt_id: it's the last address in creator's prompts list
-            const creatorPrompts = await getCreatorPrompts(account.address.toString());
+            const creatorPrompts = await getCreatorPrompts(account.address.toString(), {
+                fresh: true,
+            });
             if (!creatorPrompts || creatorPrompts.length === 0) {
                 throw new Error("Could not retrieve prompt_id after on-chain registration");
             }
@@ -498,7 +501,9 @@ export default function CreatePage() {
 
                                 <div className="flex items-center justify-between gap-3 border-t border-cream/15 pt-4">
                                     <span className="min-w-0 truncate font-mono text-xs text-cream/45">
-                                        by {account?.address ? `${account.address.substring(0, 6)}...${account.address.substring(account.address.length - 4)}` : "you"}
+                                        by {accountAddress
+                                            ? `${accountAddress.substring(0, 6)}...${accountAddress.substring(accountAddress.length - 4)}`
+                                            : "you"}
                                     </span>
                                     <span className="max-w-[9rem] shrink-0 truncate rounded-[5px] border border-cream/20 bg-cream/[0.08] px-2 py-1 text-xs font-black uppercase text-cream/55">
                                         {form.category}

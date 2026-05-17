@@ -37,6 +37,26 @@ export {
     expectedTotalChunksets,
 };
 
+function parseBlobId(blobId: string) {
+    const trimmedBlobId = blobId.trim();
+    if (!trimmedBlobId || trimmedBlobId === "pending") {
+        throw new Error(
+            "Prompt content is not ready yet. The encrypted Shelby blob has not been linked on-chain."
+        );
+    }
+
+    const [account, ...nameParts] = trimmedBlobId.split("/");
+    const blobName = nameParts.join("/").trim();
+
+    if (!account || !blobName) {
+        throw new Error(
+            "Prompt content is unavailable because its Shelby blob reference is incomplete."
+        );
+    }
+
+    return { account, blobName };
+}
+
 // ─────────────────────────────────────────────────
 // Shelby Service
 // ─────────────────────────────────────────────────
@@ -67,8 +87,7 @@ export const shelbyService = {
                 return "This is a dummy prompt content (upload failed or bypassed for testing).";
             }
 
-            const [account, ...nameParts] = blobId.split("/");
-            const blobName = nameParts.join("/");
+            const { account, blobName } = parseBlobId(blobId);
 
             const result = await shelbyClient.download({ account, blobName });
             return await new Response(result.readable).text();
@@ -112,8 +131,7 @@ export const shelbyService = {
         ciphertextHex: string;
         domainHex: string;
     }> {
-        const [account, ...nameParts] = blobId.split("/");
-        const blobName = nameParts.join("/");
+        const { account, blobName } = parseBlobId(blobId);
 
         const result = await shelbyClient.download({ account, blobName });
         const text = await new Response(result.readable).text();

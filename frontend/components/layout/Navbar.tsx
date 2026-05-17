@@ -13,7 +13,7 @@ const NAV_LINKS = [
     { href: "/explore", label: "Market", icon: Search },
     { href: "/create", label: "Upload", icon: Upload },
     { href: "/library", label: "Library", icon: Library },
-    { href: "/dashboard", label: "Dash", icon: LayoutDashboard },
+    { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
 ];
 
 export function Navbar() {
