@@ -100,32 +100,41 @@ export async function getCreatorRevenue(
 
 export async function hasAccess(
     userAddr: string,
-    promptId: string
+    promptId: string,
+    options: { fresh?: boolean } = {}
 ): Promise<boolean> {
     const result = await viewFunction<[boolean]>(
         `${MODULES.ACCESS_CONTROL}::has_access`,
-        [userAddr, promptId]
+        [userAddr, promptId],
+        [],
+        { cache: !options.fresh }
     );
     return result[0];
 }
 
 export async function getApiCallsRemaining(
     userAddr: string,
-    promptId: string
+    promptId: string,
+    options: { fresh?: boolean } = {}
 ): Promise<number> {
     const result = await viewFunction<[number]>(
         `${MODULES.ACCESS_CONTROL}::get_api_calls_remaining`,
-        [userAddr, promptId]
+        [userAddr, promptId],
+        [],
+        { cache: !options.fresh }
     );
     return Number(result[0]);
 }
 
 export async function getUserUnlockedPrompts(
-    userAddr: string
+    userAddr: string,
+    options: { fresh?: boolean } = {}
 ): Promise<string[]> {
     const result = await viewFunction<[string[]]>(
         `${MODULES.ACCESS_CONTROL}::get_user_unlocked_prompts`,
-        [userAddr]
+        [userAddr],
+        [],
+        { cache: !options.fresh }
     );
     return result[0];
 }

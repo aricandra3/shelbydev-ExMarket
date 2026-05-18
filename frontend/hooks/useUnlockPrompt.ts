@@ -2,9 +2,9 @@
 
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useWallet } from "@aptos-labs/wallet-adapter-react";
-import { aptosClient } from "@/lib/aptos";
+import { aptosClient, invalidateViewCache } from "@/lib/aptos";
 import { buildUnlockPromptPayload, buildPurchaseApiCallsPayload, buildSubscribePayload } from "@/lib/contracts";
 import { invalidatePromptRegistryCache } from "@/lib/promptRegistry";
 import { getErrorMessage } from "@/lib/utils";
@@ -12,7 +12,12 @@ import type { TransactionState } from "@/types";
 
 export function useUnlockPrompt() {
     const { account, signAndSubmitTransaction } = useWallet();
+    const accountAddress = account?.address?.toString();
     const [txState, setTxState] = useState<TransactionState>({ status: "idle" });
+
+    useEffect(() => {
+        setTxState({ status: "idle" });
+    }, [accountAddress]);
 
     const unlockPrompt = useCallback(
         async (promptId: string) => {
@@ -34,6 +39,7 @@ export function useUnlockPrompt() {
                     transactionHash: response.hash,
                 });
 
+                invalidateViewCache();
                 invalidatePromptRegistryCache();
                 setTxState({ status: "success", hash: response.hash });
                 return response.hash;
@@ -67,6 +73,7 @@ export function useUnlockPrompt() {
                     transactionHash: response.hash,
                 });
 
+                invalidateViewCache();
                 invalidatePromptRegistryCache();
                 setTxState({ status: "success", hash: response.hash });
                 return response.hash;
@@ -100,6 +107,7 @@ export function useUnlockPrompt() {
                     transactionHash: response.hash,
                 });
 
+                invalidateViewCache();
                 invalidatePromptRegistryCache();
                 setTxState({ status: "success", hash: response.hash });
                 return response.hash;

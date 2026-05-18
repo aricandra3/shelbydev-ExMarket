@@ -20,6 +20,12 @@ const WALLET_STORAGE_KEYS_TO_RESET = [
     "icDappPairings",
 ];
 
+const WALLET_JSON_STORAGE_KEYS = [
+    "@aptos-connect/connectedAccount",
+    "@aptos-connect/dapp-local-state",
+    "icDappPairings",
+];
+
 function getWalletErrorMessage(error: unknown) {
     if (typeof error === "string") return error;
     if (error instanceof Error) return error.message;
@@ -37,7 +43,7 @@ function isStorageJsonParseError(message: string) {
     );
 }
 
-function resetWalletStorage() {
+export function resetWalletStorage() {
     if (typeof window === "undefined") return;
 
     WALLET_STORAGE_KEYS_TO_RESET.forEach((key) => {
@@ -48,13 +54,16 @@ function resetWalletStorage() {
 function sanitizeWalletStorage() {
     if (typeof window === "undefined") return;
 
-    const pairings = window.localStorage.getItem("icDappPairings");
-    if (!pairings) return;
+    for (const key of WALLET_JSON_STORAGE_KEYS) {
+        const value = window.localStorage.getItem(key);
+        if (!value) continue;
 
-    try {
-        JSON.parse(pairings);
-    } catch {
-        resetWalletStorage();
+        try {
+            JSON.parse(value);
+        } catch {
+            resetWalletStorage();
+            return;
+        }
     }
 }
 

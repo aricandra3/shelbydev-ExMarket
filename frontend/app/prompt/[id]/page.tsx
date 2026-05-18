@@ -24,6 +24,7 @@ export default function PromptDetailPage() {
     const params = useParams();
     const promptId = params.id as string;
     const { account, connected, signMessage } = useWallet();
+    const accountAddress = account?.address?.toString();
 
     const [prompt, setPrompt] = useState<PromptMetadata | null>(null);
     const [loading, setLoading] = useState(true);
@@ -47,7 +48,7 @@ export default function PromptDetailPage() {
             setLoading(true);
             setLoadError(null);
             try {
-                const data = await getPromptMetadata(promptId, { fresh: true });
+                const data = await getPromptMetadata(promptId, { fresh: loadAttempt > 0 });
                 if (!cancelled) setPrompt(data);
             } catch (err: unknown) {
                 if (!cancelled) {
@@ -65,12 +66,20 @@ export default function PromptDetailPage() {
         };
     }, [promptId, loadAttempt]);
 
+    useEffect(() => {
+        setContent(null);
+        setDecryptError(null);
+        setDecrypting(false);
+        setCopied(false);
+        setCopyError(false);
+    }, [accountAddress, promptId]);
+
     // Auto-decrypt and load content when user has access
     useEffect(() => {
         let cancelled = false;
 
         async function loadAndDecryptContent() {
-            if (!hasAccess || !prompt?.blobId || content || !account) return;
+            if (!hasAccess || !prompt?.blobId || content || !account || !accountAddress) return;
             setDecrypting(true);
             setDecryptError(null);
             try {
@@ -104,7 +113,7 @@ export default function PromptDetailPage() {
                 const plaintext = await aceDecrypt({
                     ciphertextHex,
                     domainHex,
-                    userAddr: account.address.toString(),
+                    userAddr: accountAddress,
                     publicKey,
                     signature,
                     fullMessage,
@@ -124,12 +133,12 @@ export default function PromptDetailPage() {
         return () => {
             cancelled = true;
         };
-    }, [hasAccess, prompt?.blobId, account, content, signMessage, decryptAttempt]);
+    }, [hasAccess, prompt?.blobId, account, accountAddress, content, signMessage, decryptAttempt]);
 
     // After successful unlock, refresh access and load content
     useEffect(() => {
         if (txState.status === "success") {
-            refreshAccess();
+            refreshAccess(true);
             setLoadAttempt((attempt) => attempt + 1);
         }
     }, [txState.status, refreshAccess]);

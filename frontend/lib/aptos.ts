@@ -29,7 +29,8 @@ const config = new AptosConfig({
 
 export const aptosClient = new Aptos(config);
 
-const VIEW_CACHE_TTL_MS = 30_000;
+const PROMPT_REGISTRY_VIEW_CACHE_TTL_MS = 60_000;
+const ACCESS_VIEW_CACHE_TTL_MS = 15_000;
 const MAX_CONCURRENT_VIEW_CALLS = 2;
 const viewCache = new Map<string, { value: unknown; timestamp: number }>();
 const viewInFlight = new Map<string, Promise<unknown>>();
@@ -37,7 +38,23 @@ let activeViewCalls = 0;
 const viewQueue: Array<() => void> = [];
 
 function shouldCacheView(functionName: string) {
-    return functionName.includes("::prompt_registry::");
+    return (
+        functionName.includes("::prompt_registry::") ||
+        functionName.includes("::access_control::") ||
+        functionName.includes("::unlock_history::")
+    );
+}
+
+function getViewCacheTtl(functionName: string) {
+    if (functionName.includes("::access_control::")) {
+        return ACCESS_VIEW_CACHE_TTL_MS;
+    }
+
+    if (functionName.includes("::unlock_history::")) {
+        return ACCESS_VIEW_CACHE_TTL_MS;
+    }
+
+    return PROMPT_REGISTRY_VIEW_CACHE_TTL_MS;
 }
 
 function getViewCacheKey(functionName: string, args: any[], typeArgs: string[]) {
@@ -92,7 +109,7 @@ export async function viewFunction<T>(
     if (
         cacheable &&
         cached &&
-        Date.now() - cached.timestamp < VIEW_CACHE_TTL_MS
+        Date.now() - cached.timestamp < getViewCacheTtl(functionName)
     ) {
         return cached.value as T;
     }
@@ -173,6 +190,21 @@ export async function viewFunction<T>(
     }
 
     return result as T;
+}
+
+export function invalidateViewCache(functionNamePart?: string) {
+    if (!functionNamePart) {
+        viewCache.clear();
+        viewInFlight.clear();
+        return;
+    }
+
+    Array.from(viewCache.keys()).forEach((key) => {
+        if (key.includes(functionNamePart)) viewCache.delete(key);
+    });
+    Array.from(viewInFlight.keys()).forEach((key) => {
+        if (key.includes(functionNamePart)) viewInFlight.delete(key);
+    });
 }
 
 // ── Transaction Builder ─────────────────────────
