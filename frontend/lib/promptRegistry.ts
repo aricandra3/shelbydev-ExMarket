@@ -2,7 +2,7 @@
 
 import type { PromptMetadata } from "@/types";
 
-const CACHE_TTL_MS = 30_000;
+const CACHE_TTL_MS = 120_000;
 
 export type RegistryLoadResult = {
     prompts: PromptMetadata[];
@@ -70,6 +70,14 @@ export async function loadPromptRegistry(
             browserCache = { prompts: result.prompts, timestamp: Date.now() };
             return result;
         })
+        .catch((error) => {
+            if (browserCache) {
+                console.warn("Prompt registry refresh failed; using browser cache.", error);
+                return { prompts: browserCache.prompts, stale: true };
+            }
+
+            throw error;
+        })
         .finally(() => {
             forceNextLoad = false;
             browserInFlight = null;
@@ -95,12 +103,16 @@ export async function findPromptInRegistry(promptId: string) {
 }
 
 export async function getCreatorPromptIdsFromRegistry(creatorAddr: string) {
+    const prompts = await getCreatorPromptsFromRegistry(creatorAddr);
+    return prompts.map((prompt) => prompt.promptId);
+}
+
+export async function getCreatorPromptsFromRegistry(creatorAddr: string) {
     const normalizedCreator = normalizeAptosAddress(creatorAddr);
     const result = await loadPromptRegistry();
 
     return result.prompts
         .filter(
             (prompt) => normalizeAptosAddress(prompt.creator) === normalizedCreator
-        )
-        .map((prompt) => prompt.promptId);
+        );
 }

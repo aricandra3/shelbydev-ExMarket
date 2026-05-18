@@ -2,53 +2,55 @@
 
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useWallet } from "@aptos-labs/wallet-adapter-react";
-import {
-    getCreatorPrompts,
-    getCreatorRevenue,
-    getPromptMetadata,
-} from "@/lib/contracts";
+import { getCreatorPromptsFromRegistry } from "@/lib/promptRegistry";
 import type { PromptMetadata } from "@/types";
 import { getErrorMessage, isRateLimitError } from "@/lib/utils";
 
 export function useCreatorDashboard() {
     const { account } = useWallet();
+    const accountAddress = account?.address?.toString();
     const [prompts, setPrompts] = useState<PromptMetadata[]>([]);
     const [totalRevenue, setTotalRevenue] = useState(0);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const requestIdRef = useRef(0);
 
     const refresh = useCallback(async () => {
-        if (!account?.address) return;
+        const requestId = requestIdRef.current + 1;
+        requestIdRef.current = requestId;
+
+        if (!accountAddress) {
+            setPrompts([]);
+            setTotalRevenue(0);
+            setError(null);
+            setLoading(false);
+            return;
+        }
 
         setLoading(true);
         setError(null);
+        setPrompts([]);
+        setTotalRevenue(0);
         try {
-            const [promptIds, revenue] = await Promise.all([
-                getCreatorPrompts(account.address.toString(), { fresh: true }),
-                getCreatorRevenue(account.address.toString()),
-            ]);
-
-            setTotalRevenue(revenue);
-
-            // Fetch metadata for each prompt
-            const metadatas = (
-                await Promise.all(
-                    promptIds.map((id) => getPromptMetadata(id).catch(() => null))
-                )
-            ).filter((metadata): metadata is PromptMetadata => metadata !== null);
+            const metadatas = await getCreatorPromptsFromRegistry(accountAddress);
+            if (requestId !== requestIdRef.current) return;
+            setTotalRevenue(
+                metadatas.reduce((sum, prompt) => sum + prompt.totalRevenue, 0)
+            );
             setPrompts(metadatas);
         } catch (error: unknown) {
+            if (requestId !== requestIdRef.current) return;
             setError(
                 isRateLimitError(error)
                     ? "Aptos is rate limiting dashboard data. Wait a moment, then retry."
                     : getErrorMessage(error, "Dashboard data could not be loaded.")
             );
         } finally {
-            setLoading(false);
+            if (requestId === requestIdRef.current) setLoading(false);
         }
-    }, [account?.address]);
+    }, [accountAddress]);
 
     useEffect(() => {
         refresh();

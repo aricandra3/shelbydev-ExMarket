@@ -2,10 +2,11 @@
 
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import Link from "next/link";
 import { useWallet } from "@aptos-labs/wallet-adapter-react";
-import { getUserUnlockedPrompts, getPromptMetadata } from "@/lib/contracts";
+import { getUserUnlockedPrompts } from "@/lib/contracts";
+import { loadPromptRegistry } from "@/lib/promptRegistry";
 import { formatApt } from "@/lib/constants";
 import { getErrorMessage, isRateLimitError } from "@/lib/utils";
 import type { PromptMetadata } from "@/types";
@@ -155,34 +156,47 @@ function SkeletonCard({ isLarge }: { isLarge: boolean }) {
 // ── Main Page ─────────────────────────────────────────────────────────
 export default function LibraryPage() {
   const { account, connected } = useWallet();
+  const accountAddress = account?.address?.toString();
   const [prompts, setPrompts] = useState<PromptMetadata[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [activeCategory, setActiveCategory] = useState<string>("All");
   const [search, setSearch] = useState("");
+  const requestIdRef = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
 
     async function load() {
-      if (!account?.address) {
-        if (!cancelled) setLoading(false);
+      if (!accountAddress) {
+        if (!cancelled && requestId === requestIdRef.current) {
+          setPrompts([]);
+          setError(null);
+          setLoading(false);
+        }
         return;
       }
 
       setLoading(true);
       setError(null);
+      setPrompts([]);
       try {
-        const ids = await getUserUnlockedPrompts(account.address.toString());
-        const metadatas = await Promise.all(
-          ids.map((id) => getPromptMetadata(id).catch(() => null))
+        const [ids, registry] = await Promise.all([
+          getUserUnlockedPrompts(accountAddress),
+          loadPromptRegistry(),
+        ]);
+        const unlockedIds = new Set(ids.map((id) => id.toLowerCase()));
+        const metadatas = registry.prompts.filter((prompt) =>
+          unlockedIds.has(prompt.promptId.toLowerCase())
         );
-        if (!cancelled) {
-          setPrompts(metadatas.filter((m): m is PromptMetadata => m !== null));
+        if (!cancelled && requestId === requestIdRef.current) {
+          setPrompts(metadatas);
         }
       } catch (err: unknown) {
-        if (!cancelled) {
+        if (!cancelled && requestId === requestIdRef.current) {
           setPrompts([]);
           setError(
             isRateLimitError(err)
@@ -191,7 +205,7 @@ export default function LibraryPage() {
           );
         }
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled && requestId === requestIdRef.current) setLoading(false);
       }
     }
     load();
@@ -199,7 +213,7 @@ export default function LibraryPage() {
     return () => {
       cancelled = true;
     };
-  }, [account?.address, loadAttempt]);
+  }, [accountAddress, loadAttempt]);
 
   // Unique categories present in library
   const categories = useMemo(() => {

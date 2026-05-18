@@ -2,13 +2,13 @@
 
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { getErrorMessage, isRateLimitError } from "@/lib/utils";
 import { loadPromptRegistry } from "@/lib/promptRegistry";
 import type { PromptMetadata } from "@/types";
 
 export function usePromptRegistry(category?: string) {
-    const [prompts, setPrompts] = useState<PromptMetadata[]>([]);
+    const [registryPrompts, setRegistryPrompts] = useState<PromptMetadata[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [stale, setStale] = useState(false);
@@ -19,14 +19,7 @@ export function usePromptRegistry(category?: string) {
 
         try {
             const result = await loadPromptRegistry(force);
-            let filtered = result.prompts;
-
-            // Category filter
-            if (category) {
-                filtered = filtered.filter((m) => m.category === category);
-            }
-
-            setPrompts(filtered);
+            setRegistryPrompts(result.prompts);
             setStale(Boolean(result.stale));
         } catch (err: unknown) {
             setStale(false);
@@ -38,11 +31,16 @@ export function usePromptRegistry(category?: string) {
         } finally {
             setLoading(false);
         }
-    }, [category]);
+    }, []);
 
     useEffect(() => {
         fetchPrompts();
     }, [fetchPrompts]);
+
+    const prompts = useMemo(() => {
+        if (!category) return registryPrompts;
+        return registryPrompts.filter((prompt) => prompt.category === category);
+    }, [registryPrompts, category]);
 
     return {
         prompts,

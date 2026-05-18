@@ -23,7 +23,7 @@ export function Navbar() {
     return (
         <nav className="sticky top-0 z-50 px-4 py-4">
             <div className="mx-auto max-w-[1400px]">
-                <div className="glass-card flex items-center justify-between px-4 py-3 md:px-5">
+                <div className="glass-card flex overflow-visible items-center justify-between px-4 py-3 md:px-5">
 
                     <Link href="/" className="group flex items-center gap-2.5">
                         <span className="flex h-8 w-8 flex-shrink-0 rotate-[-3deg] items-center justify-center rounded-[6px] border-2 border-ink bg-retro-yellow text-sm font-black text-ink shadow-neo-sm transition-transform group-hover:rotate-3">
