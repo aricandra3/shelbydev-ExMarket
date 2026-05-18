@@ -8,6 +8,7 @@ import { useRouter } from "next/navigation";
 import { useWallet } from "@aptos-labs/wallet-adapter-react";
 import { aptosClient } from "@/lib/aptos";
 import { buildRegisterPromptPayload, buildUpdateBlobIdPayload, getCreatorPrompts } from "@/lib/contracts";
+import { invalidatePromptRegistryCache } from "@/lib/promptRegistry";
 import { aptToOctas, PROMPT_CATEGORIES } from "@/lib/constants";
 import { PRICING_MODEL_REVERSE } from "@/types";
 import type { PricingModel } from "@/types";
@@ -183,6 +184,7 @@ export default function CreatePage() {
                 transactionHash: updateResponse.hash,
             });
 
+            invalidatePromptRegistryCache();
             setTxHash(updateResponse.hash);
             setStep("success");
         } catch (err: unknown) {
