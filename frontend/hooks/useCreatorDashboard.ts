@@ -3,13 +3,13 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useWallet } from "@aptos-labs/wallet-adapter-react";
+import { useAppWallet } from "@/components/wallet/walletContext";
 import { getCreatorPromptsFromRegistry } from "@/lib/promptRegistry";
 import type { PromptMetadata } from "@/types";
 import { getErrorMessage, isRateLimitError } from "@/lib/utils";
 
 export function useCreatorDashboard() {
-    const { account } = useWallet();
+    const { account } = useAppWallet();
     const accountAddress = account?.address?.toString();
     const [prompts, setPrompts] = useState<PromptMetadata[]>([]);
     const [totalRevenue, setTotalRevenue] = useState(0);

@@ -5,15 +5,13 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { useWallet } from "@aptos-labs/wallet-adapter-react";
-import { Ed25519PublicKey, Ed25519Signature } from "@aptos-labs/ts-sdk";
+import { useAppWallet } from "@/components/wallet/walletContext";
 import { useAccessCheck } from "@/hooks/useAccessCheck";
 import { useUnlockPrompt } from "@/hooks/useUnlockPrompt";
 import { getPromptMetadata } from "@/lib/contracts";
 import { formatApt } from "@/lib/constants";
 import { copyToClipboard, getErrorMessage, truncateAddress } from "@/lib/utils";
 import type { PromptMetadata } from "@/types";
-import { aceDecrypt, getSigningMessage } from "@/lib/ace";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -23,7 +21,7 @@ import { CheckCircle2, Clipboard, LockKeyhole, Wallet } from "lucide-react";
 export default function PromptDetailPage() {
     const params = useParams();
     const promptId = params.id as string;
-    const { account, connected, signMessage } = useWallet();
+    const { account, connected, signMessage } = useAppWallet();
     const accountAddress = account?.address?.toString();
 
     const [prompt, setPrompt] = useState<PromptMetadata | null>(null);
@@ -84,7 +82,15 @@ export default function PromptDetailPage() {
             setDecryptError(null);
             try {
                 // 1. Fetch the encrypted blob from Shelby
-                const { shelbyService } = await import("@/lib/shelby");
+                const [
+                    { shelbyService },
+                    { aceDecrypt, getSigningMessage },
+                    { Ed25519PublicKey, Ed25519Signature },
+                ] = await Promise.all([
+                    import("@/lib/shelby"),
+                    import("@/lib/ace"),
+                    import("@aptos-labs/ts-sdk"),
+                ]);
                 const { ciphertextHex, domainHex } = await shelbyService.readEncryptedBlob(prompt.blobId);
 
                 // 2. Ask the wallet to sign the ACE permission message

@@ -4,7 +4,7 @@
 
 import { useEffect, useState, useMemo, useRef } from "react";
 import Link from "next/link";
-import { useWallet } from "@aptos-labs/wallet-adapter-react";
+import { useAppWallet } from "@/components/wallet/walletContext";
 import { getUserUnlockedPrompts } from "@/lib/contracts";
 import { loadPromptRegistry } from "@/lib/promptRegistry";
 import { formatApt } from "@/lib/constants";
@@ -155,7 +155,7 @@ function SkeletonCard({ isLarge }: { isLarge: boolean }) {
 
 // ── Main Page ─────────────────────────────────────────────────────────
 export default function LibraryPage() {
-  const { account, connected } = useWallet();
+  const { account, connected } = useAppWallet();
   const accountAddress = account?.address?.toString();
   const [prompts, setPrompts] = useState<PromptMetadata[]>([]);
   const [loading, setLoading] = useState(true);

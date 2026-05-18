@@ -3,11 +3,10 @@
 "use client";
 
 import Link from "next/link";
-import { useWallet } from "@aptos-labs/wallet-adapter-react";
+import { useAppWallet } from "@/components/wallet/walletContext";
 import { useCreatorDashboard } from "@/hooks/useCreatorDashboard";
 import { formatApt } from "@/lib/constants";
 import { truncateAddress } from "@/lib/utils";
-import { motion, useReducedMotion } from "framer-motion";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -15,9 +14,8 @@ import { Card } from "@/components/ui/card";
 import { Plus, WalletCards } from "lucide-react";
 
 export default function DashboardPage() {
-    const { account, connected } = useWallet();
+    const { account, connected } = useAppWallet();
     const { prompts, totalRevenue, loading, error, refresh } = useCreatorDashboard();
-    const shouldReduceMotion = useReducedMotion();
 
     if (!connected) {
         return (
@@ -69,12 +67,7 @@ export default function DashboardPage() {
             )}
 
             {/* Stats Grid */}
-            <motion.div
-                initial={shouldReduceMotion ? { opacity: 1, y: 0 } : { opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={shouldReduceMotion ? { duration: 0 } : { duration: 0.4 }}
-                className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8"
-            >
+            <div className="mb-8 grid grid-cols-2 gap-4 md:grid-cols-4">
                 {[
                     {
                         label: "Total Revenue",
@@ -97,12 +90,7 @@ export default function DashboardPage() {
                         color: "text-cream/70",
                     },
                 ].map((stat, i) => (
-                    <motion.div
-                        key={stat.label}
-                        initial={shouldReduceMotion ? { opacity: 1, y: 0 } : { opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={shouldReduceMotion ? { duration: 0 } : { duration: 0.4, delay: i * 0.1 }}
-                    >
+                    <div key={stat.label} className="animate-slide-up">
                         <Card className="h-full p-5 holographic-hover">
                             <div className={`text-3xl font-black ${stat.color}`}>
                                 {stat.value}
@@ -111,9 +99,9 @@ export default function DashboardPage() {
                                 {stat.label}
                             </div>
                         </Card>
-                    </motion.div>
+                    </div>
                 ))}
-            </motion.div>
+            </div>
 
             {/* Prompt List */}
             <Card className="overflow-hidden">
@@ -124,11 +112,8 @@ export default function DashboardPage() {
                 {loading ? (
                     <div className="p-6 space-y-4">
                         {Array.from({ length: 3 }).map((_, i) => (
-                            <motion.div
+                            <div
                                 key={i}
-                                initial={shouldReduceMotion ? { opacity: 1, x: 0 } : { opacity: 0, x: -20 }}
-                                animate={{ opacity: 1, x: 0 }}
-                                transition={shouldReduceMotion ? { duration: 0 } : { duration: 0.4, delay: i * 0.1 }}
                                 className="skeleton h-12 w-full"
                             />
                         ))}
@@ -143,19 +128,9 @@ export default function DashboardPage() {
                         </Link>
                     </div>
                 ) : (
-                    <motion.div
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        transition={shouldReduceMotion ? { duration: 0 } : undefined}
-                        className="divide-y divide-cream/10"
-                    >
+                    <div className="divide-y divide-cream/10 animate-fade-in">
                         {prompts.map((prompt, i) => (
-                            <motion.div
-                                key={prompt.promptId}
-                                initial={shouldReduceMotion ? { opacity: 1, x: 0 } : { opacity: 0, x: -20 }}
-                                animate={{ opacity: 1, x: 0 }}
-                                transition={shouldReduceMotion ? { duration: 0 } : { duration: 0.3, delay: i * 0.05 }}
-                            >
+                            <div key={prompt.promptId}>
                                 <Link
                                     href={`/prompt/${prompt.promptId}`}
                                     className="flex items-center justify-between px-6 py-4 transition-colors hover:bg-cream/[0.06]"
@@ -185,9 +160,9 @@ export default function DashboardPage() {
                                         </div>
                                     </div>
                                 </Link>
-                            </motion.div>
+                            </div>
                         ))}
-                    </motion.div>
+                    </div>
                 )}
             </Card>
         </div>

@@ -3,11 +3,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import {
-    useWallet,
-    WalletReadyState,
-} from "@aptos-labs/wallet-adapter-react";
-import { resetWalletStorage } from "@/components/wallet/WalletProvider";
+import { useAppWallet } from "@/components/wallet/walletContext";
+import { resetWalletStorage } from "@/components/wallet/walletStorage";
 import { copyToClipboard, getErrorMessage, truncateAddress } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
@@ -33,7 +30,7 @@ export function ConnectButton() {
         wallet,
         wallets,
         isLoading,
-    } = useWallet();
+    } = useAppWallet();
     const [showMenu, setShowMenu] = useState(false);
     const [busyWallet, setBusyWallet] = useState<string | null>(null);
     const [disconnecting, setDisconnecting] = useState(false);
@@ -44,14 +41,14 @@ export function ConnectButton() {
     const installedWallets = useMemo(
         () =>
             availableWallets.filter(
-                (item) => item.readyState === WalletReadyState.Installed
+                (item) => String(item.readyState) === "Installed"
             ),
         [availableWallets]
     );
     const unavailableWallets = useMemo(
         () =>
             availableWallets.filter(
-                (item) => item.readyState !== WalletReadyState.Installed
+                (item) => String(item.readyState) !== "Installed"
             ),
         [availableWallets]
     );

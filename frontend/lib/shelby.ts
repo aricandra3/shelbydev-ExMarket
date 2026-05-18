@@ -6,7 +6,6 @@
 ///   - Creator: aceEncrypt(content) → putEncryptedBlob({ ciphertext, domain })
 ///   - Buyer:   readEncryptedBlob(blobId) → aceDecrypt(ciphertext, domain, proof)
 
-import { Network } from "@aptos-labs/ts-sdk";
 import {
     ShelbyClient,
     ShelbyBlobClient,
@@ -19,12 +18,20 @@ import {
 
 import { NETWORK } from "./constants";
 
+type PutBlobProgress = {
+    phase: "starting" | "uploading" | "finalizing" | "complete";
+    uploadedBytes: number;
+    totalBytes: number;
+};
+
+const SHELBY_COMPLETE_TIMEOUT_MS = 60_000;
+
 // ─────────────────────────────────────────────────
 // Shelby Client
 // ─────────────────────────────────────────────────
 
 const shelbyClient = new ShelbyClient({
-    network: NETWORK === "shelbynet" ? ("shelbynet" as any) : Network.TESTNET,
+    network: NETWORK === "shelbynet" ? ("shelbynet" as any) : ("testnet" as any),
 });
 
 export {
@@ -55,6 +62,91 @@ function parseBlobId(blobId: string) {
     }
 
     return { account, blobName };
+}
+
+async function fetchWithTimeout(init: RequestInit, timeoutMs: number, label: string) {
+    const controller = new AbortController();
+    const timeout = globalThis.setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+        return await fetch("/api/v1/shelby/upload", {
+            ...init,
+            signal: controller.signal,
+        });
+    } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") {
+            throw new Error(`${label} timed out. Shelby RPC did not respond in time.`);
+        }
+
+        throw error;
+    } finally {
+        globalThis.clearTimeout(timeout);
+    }
+}
+
+async function readErrorBody(response: Response) {
+    try {
+        return await response.text();
+    } catch {
+        return "Could not read error body";
+    }
+}
+
+async function uploadEncryptedBlobWithServerKey(
+    address: string,
+    blobName: string,
+    ciphertextHex: string,
+    domainHex: string,
+    onProgress?: (progress: PutBlobProgress) => void
+) {
+    const totalBytes = new TextEncoder().encode(
+        JSON.stringify({ ciphertextHex, domainHex })
+    ).length;
+
+    onProgress?.({
+        phase: "starting",
+        uploadedBytes: 0,
+        totalBytes,
+    });
+
+    onProgress?.({
+        phase: "uploading",
+        uploadedBytes: 0,
+        totalBytes,
+    });
+
+    onProgress?.({
+        phase: "finalizing",
+        uploadedBytes: totalBytes,
+        totalBytes,
+    });
+
+    const response = await fetchWithTimeout(
+        {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                account: address,
+                blobName,
+                ciphertextHex,
+                domainHex,
+            }),
+        },
+        SHELBY_COMPLETE_TIMEOUT_MS,
+        "Uploading encrypted content to Shelby"
+    );
+
+    if (!response.ok) {
+        throw new Error(
+            `Shelby upload failed. status: ${response.status}, body: ${await readErrorBody(response)}`
+        );
+    }
+
+    onProgress?.({
+        phase: "complete",
+        uploadedBytes: totalBytes,
+        totalBytes,
+    });
 }
 
 // ─────────────────────────────────────────────────
@@ -109,16 +201,16 @@ export const shelbyService = {
         ciphertextHex: string,
         domainHex: string,
         address: string,
-        blobName: string
+        blobName: string,
+        onProgress?: (progress: PutBlobProgress) => void
     ): Promise<void> {
-        const payload = JSON.stringify({ ciphertextHex, domainHex });
-        const blobData = new TextEncoder().encode(payload);
-
-        await shelbyClient.rpc.putBlob({
-            account: address,
+        await uploadEncryptedBlobWithServerKey(
+            address,
             blobName,
-            blobData,
-        });
+            ciphertextHex,
+            domainHex,
+            onProgress
+        );
     },
 
     /**

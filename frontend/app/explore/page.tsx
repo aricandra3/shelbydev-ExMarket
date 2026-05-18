@@ -8,7 +8,6 @@ import { usePromptRegistry } from "@/hooks/usePromptRegistry";
 import { PROMPT_CATEGORIES } from "@/types";
 import { formatApt } from "@/lib/constants";
 import { cn } from "@/lib/utils";
-import { motion, useReducedMotion } from "framer-motion";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -20,7 +19,6 @@ export default function ExplorePage() {
         undefined
     );
     const { prompts, loading, error, stale, refresh } = usePromptRegistry(selectedCategory);
-    const shouldReduceMotion = useReducedMotion();
 
     return (
         <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
@@ -80,12 +78,7 @@ export default function ExplorePage() {
             {loading ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
                     {Array.from({ length: 6 }).map((_, i) => (
-                        <motion.div
-                            key={`skeleton-${i}`}
-                            initial={shouldReduceMotion ? { opacity: 1, y: 0 } : { opacity: 0, y: 20 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={shouldReduceMotion ? { duration: 0 } : { delay: i * 0.1, duration: 0.5 }}
-                        >
+                        <div key={`skeleton-${i}`} className="animate-slide-up">
                             <Card className="flex h-[250px] animate-pulse flex-col justify-between p-6">
                                 <div className="flex items-start justify-between">
                                     <div className="skeleton h-6 w-20"></div>
@@ -100,7 +93,7 @@ export default function ExplorePage() {
                                     <div className="skeleton h-4 w-24"></div>
                                 </div>
                             </Card>
-                        </motion.div>
+                        </div>
                     ))}
                 </div>
             ) : error ? (
@@ -126,19 +119,9 @@ export default function ExplorePage() {
                             </Link>
                         </Card>
                     ) : (
-                        <motion.div
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            transition={shouldReduceMotion ? { duration: 0 } : undefined}
-                            className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6"
-                        >
+                        <div className="grid grid-cols-1 gap-6 animate-fade-in sm:grid-cols-2 lg:grid-cols-3">
                             {prompts.map((prompt, i) => (
-                                <motion.div
-                                    key={prompt.promptId}
-                                    initial={shouldReduceMotion ? { opacity: 1, y: 0 } : { opacity: 0, y: 20 }}
-                                    animate={{ opacity: 1, y: 0 }}
-                                    transition={shouldReduceMotion ? { duration: 0 } : { duration: 0.4, delay: i * 0.05 }}
-                                >
+                                <div key={prompt.promptId}>
                                     <Link
                                         href={`/prompt/${prompt.promptId}`}
                                         className="glass-card-hover holographic-hover flex h-full flex-col p-6"
@@ -169,9 +152,9 @@ export default function ExplorePage() {
                                             </span>
                                         </div>
                                     </Link>
-                                </motion.div>
+                                </div>
                             ))}
-                        </motion.div>
+                        </div>
                     )}
                 </>
             )}

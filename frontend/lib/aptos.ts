@@ -1,37 +1,12 @@
-/// Aptos client setup and transaction helpers
-/// Configured per: https://docs.shelby.xyz/sdks/typescript/acquire-api-keys
+/// Browser-safe Aptos helpers
+/// Read calls go through /api/v1/view so @aptos-labs/ts-sdk stays server-side.
 
-import { Aptos, AptosConfig, Network } from "@aptos-labs/ts-sdk";
-import { NETWORK, APTOS_NODE_URL, APTOS_INDEXER_URL } from "./constants";
 import { isRateLimitError } from "./utils";
-
-// ── Network Mapping ─────────────────────────────
-// "shelbynet" is a custom Aptos network, so we use CUSTOM and provide URLs
-const isCustomNetwork = NETWORK === "shelbynet";
-const APTOS_API_KEY =
-    typeof window === "undefined" ? process.env.APTOS_API_KEY : undefined;
-const APTOS_API_ORIGIN =
-    typeof window === "undefined"
-        ? process.env.APTOS_API_ORIGIN || "http://localhost:3000"
-        : undefined;
-
-const config = new AptosConfig({
-    network: isCustomNetwork ? Network.CUSTOM : Network.TESTNET,
-    fullnode: APTOS_NODE_URL,
-    indexer: APTOS_INDEXER_URL,
-    clientConfig: APTOS_API_KEY
-        ? {
-              API_KEY: APTOS_API_KEY,
-              HEADERS: APTOS_API_ORIGIN ? { Origin: APTOS_API_ORIGIN } : undefined,
-          }
-        : undefined,
-});
-
-export const aptosClient = new Aptos(config);
 
 const PROMPT_REGISTRY_VIEW_CACHE_TTL_MS = 60_000;
 const ACCESS_VIEW_CACHE_TTL_MS = 15_000;
 const MAX_CONCURRENT_VIEW_CALLS = 2;
+const TRANSACTION_WAIT_TIMEOUT_MS = 90_000;
 const viewCache = new Map<string, { value: unknown; timestamp: number }>();
 const viewInFlight = new Map<string, Promise<unknown>>();
 let activeViewCalls = 0;
@@ -118,63 +93,35 @@ export async function viewFunction<T>(
         return (await viewInFlight.get(cacheKey)) as T;
     }
 
-    if (typeof window !== "undefined") {
-        const promise = runLimitedView(() =>
-            retryView(async () => {
-                const response = await fetch("/api/v1/view", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        functionName,
-                        args,
-                        typeArgs,
-                        cache: options.cache !== false,
-                    }),
-                    cache: "no-store",
-                });
-
-                const payload = await response.json().catch(() => null);
-                if (!response.ok) {
-                    const message =
-                        payload && typeof payload.error === "string"
-                            ? payload.error
-                            : "Aptos view request failed.";
-                    throw new Error(message);
-                }
-
-                if (!payload || typeof payload !== "object" || !("result" in payload)) {
-                    throw new Error("Aptos view response was invalid.");
-                }
-
-                return payload.result as T;
-            })
-        );
-
-        if (cacheable) {
-            viewInFlight.set(cacheKey, promise);
-        }
-
-        const result = await promise.finally(() => {
-            if (cacheable) viewInFlight.delete(cacheKey);
-        });
-
-        if (cacheable) {
-            viewCache.set(cacheKey, { value: result, timestamp: Date.now() });
-        }
-
-        return result as T;
-    }
-
     const promise = runLimitedView(() =>
-        retryView(() =>
-            aptosClient.view({
-                payload: {
-                    function: functionName as `${string}::${string}::${string}`,
-                    functionArguments: args,
-                    typeArguments: typeArgs,
-                },
-            })
-        )
+        retryView(async () => {
+            const response = await fetch("/api/v1/view", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    functionName,
+                    args,
+                    typeArgs,
+                    cache: options.cache !== false,
+                }),
+                cache: "no-store",
+            });
+
+            const payload = await response.json().catch(() => null);
+            if (!response.ok) {
+                const message =
+                    payload && typeof payload.error === "string"
+                        ? payload.error
+                        : "Aptos view request failed.";
+                throw new Error(message);
+            }
+
+            if (!payload || typeof payload !== "object" || !("result" in payload)) {
+                throw new Error("Aptos view response was invalid.");
+            }
+
+            return payload.result as T;
+        })
     );
 
     if (cacheable) {
@@ -190,6 +137,49 @@ export async function viewFunction<T>(
     }
 
     return result as T;
+}
+
+export async function waitForTransaction(
+    transactionHash: string,
+    options: { checkSuccess?: boolean; waitForIndexer?: boolean } = {}
+) {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(
+        () => controller.abort(),
+        TRANSACTION_WAIT_TIMEOUT_MS
+    );
+
+    let response: Response;
+    try {
+        response = await fetch("/api/v1/transaction", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ transactionHash, options }),
+            cache: "no-store",
+            signal: controller.signal,
+        });
+    } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") {
+            throw new Error(
+                "Transaction confirmation timed out. Check the wallet activity or explorer before retrying."
+            );
+        }
+
+        throw error;
+    } finally {
+        window.clearTimeout(timeout);
+    }
+
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) {
+        const message =
+            payload && typeof payload.error === "string"
+                ? payload.error
+                : "Transaction confirmation failed.";
+        throw new Error(message);
+    }
+
+    return payload;
 }
 
 export function invalidateViewCache(functionNamePart?: string) {

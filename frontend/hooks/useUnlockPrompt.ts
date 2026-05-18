@@ -3,15 +3,15 @@
 "use client";
 
 import { useState, useCallback, useEffect } from "react";
-import { useWallet } from "@aptos-labs/wallet-adapter-react";
-import { aptosClient, invalidateViewCache } from "@/lib/aptos";
+import { useAppWallet } from "@/components/wallet/walletContext";
+import { invalidateViewCache, waitForTransaction } from "@/lib/aptos";
 import { buildUnlockPromptPayload, buildPurchaseApiCallsPayload, buildSubscribePayload } from "@/lib/contracts";
 import { invalidatePromptRegistryCache } from "@/lib/promptRegistry";
 import { getErrorMessage } from "@/lib/utils";
 import type { TransactionState } from "@/types";
 
 export function useUnlockPrompt() {
-    const { account, signAndSubmitTransaction } = useWallet();
+    const { account, signAndSubmitTransaction } = useAppWallet();
     const accountAddress = account?.address?.toString();
     const [txState, setTxState] = useState<TransactionState>({ status: "idle" });
 
@@ -35,9 +35,7 @@ export function useUnlockPrompt() {
                 const response = await signAndSubmitTransaction({ data: payload });
                 setTxState({ status: "confirming", hash: response.hash });
 
-                await aptosClient.waitForTransaction({
-                    transactionHash: response.hash,
-                });
+                await waitForTransaction(response.hash);
 
                 invalidateViewCache();
                 invalidatePromptRegistryCache();
@@ -69,9 +67,7 @@ export function useUnlockPrompt() {
                 const response = await signAndSubmitTransaction({ data: payload });
                 setTxState({ status: "confirming", hash: response.hash });
 
-                await aptosClient.waitForTransaction({
-                    transactionHash: response.hash,
-                });
+                await waitForTransaction(response.hash);
 
                 invalidateViewCache();
                 invalidatePromptRegistryCache();
@@ -103,9 +99,7 @@ export function useUnlockPrompt() {
                 const response = await signAndSubmitTransaction({ data: payload });
                 setTxState({ status: "confirming", hash: response.hash });
 
-                await aptosClient.waitForTransaction({
-                    transactionHash: response.hash,
-                });
+                await waitForTransaction(response.hash);
 
                 invalidateViewCache();
                 invalidatePromptRegistryCache();
