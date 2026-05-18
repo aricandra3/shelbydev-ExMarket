@@ -26,7 +26,7 @@ export function useCreatorDashboard() {
         setError(null);
         try {
             const [promptIds, revenue] = await Promise.all([
-                getCreatorPrompts(account.address.toString()),
+                getCreatorPrompts(account.address.toString(), { fresh: true }),
                 getCreatorRevenue(account.address.toString()),
             ]);
 

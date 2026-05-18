@@ -2,7 +2,12 @@
 /// Keeps Aptos transaction scans off the browser to reduce 429s in dev and production.
 
 import { NextRequest, NextResponse } from "next/server";
-import { APTOS_NODE_URL, MODULE_ADDRESS, MODULES } from "@/lib/constants";
+import {
+    APTOS_INDEXER_URL,
+    APTOS_NODE_URL,
+    MODULE_ADDRESS,
+    MODULES,
+} from "@/lib/constants";
 import { viewFunction } from "@/lib/aptos";
 import { isRateLimitError, truncateAddress } from "@/lib/utils";
 import type { PromptMetadata } from "@/types";
@@ -12,6 +17,9 @@ export const dynamic = "force-dynamic";
 
 const CACHE_TTL_MS = 60_000;
 const TRANSACTION_SCAN_LIMIT = 200;
+const TRANSACTION_FETCH_CONCURRENCY = 4;
+const INDEXER_PAGE_SIZE = 5;
+const INDEXER_MAX_PAGES = 2;
 const METADATA_ENRICH_LIMIT = 80;
 const METADATA_ENRICH_CONCURRENCY = 2;
 const RATE_LIMIT_STATUS = 429;
@@ -24,7 +32,19 @@ type AptosEvent = {
 };
 
 type AptosTransaction = {
+    version?: number | string;
     events?: AptosEvent[];
+};
+
+type IndexerUserTransaction = {
+    version: number | string;
+};
+
+type IndexerUserTransactionsResponse = {
+    data?: {
+        user_transactions?: IndexerUserTransaction[];
+    };
+    errors?: Array<{ message?: string }>;
 };
 
 let cache:
@@ -45,6 +65,14 @@ function sleep(ms: number) {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function getAptosHeaders(contentType = false): HeadersInit {
+    const headers: Record<string, string> = {};
+    if (contentType) headers["Content-Type"] = "application/json";
+    if (APTOS_API_ORIGIN) headers.Origin = APTOS_API_ORIGIN;
+    if (APTOS_API_KEY) headers.Authorization = `Bearer ${APTOS_API_KEY}`;
+    return headers;
+}
+
 async function fetchWithRetry(url: string, init: RequestInit, retries = 2) {
     for (let attempt = 0; attempt <= retries; attempt += 1) {
         const response = await fetch(url, init);
@@ -63,6 +91,93 @@ async function fetchWithRetry(url: string, init: RequestInit, retries = 2) {
     }
 
     throw new Error("Failed to fetch after retry");
+}
+
+async function fetchIndexerRegisterPage(
+    offset: number
+): Promise<Array<number | string>> {
+    const query = `
+        query PromptRegistrations($entryFunction: String!, $limit: Int!, $offset: Int!) {
+            user_transactions(
+                where: { entry_function_id_str: { _eq: $entryFunction } }
+                order_by: { version: desc }
+                limit: $limit
+                offset: $offset
+            ) {
+                version
+            }
+        }
+    `;
+
+    const response = await fetchWithRetry(APTOS_INDEXER_URL, {
+        method: "POST",
+        headers: getAptosHeaders(true),
+        cache: "no-store",
+        body: JSON.stringify({
+            query,
+            variables: {
+                entryFunction: `${MODULES.PROMPT_REGISTRY}::register_prompt`,
+                limit: INDEXER_PAGE_SIZE,
+                offset,
+            },
+        }),
+    });
+
+    if (!response.ok) {
+        throw new Error(`Aptos indexer HTTP ${response.status}: ${response.statusText}`);
+    }
+
+    const payload = (await response.json()) as IndexerUserTransactionsResponse;
+    if (payload.errors?.length) {
+        throw new Error(
+            payload.errors.map((error) => error.message).filter(Boolean).join("; ") ||
+                "Aptos indexer query failed."
+        );
+    }
+
+    return (payload.data?.user_transactions ?? []).map((tx) => tx.version);
+}
+
+async function fetchIndexerRegisterVersions(): Promise<Array<number | string>> {
+    const versions: Array<number | string> = [];
+
+    for (let page = 0; page < INDEXER_MAX_PAGES; page += 1) {
+        const offset = page * INDEXER_PAGE_SIZE;
+
+        try {
+            const pageVersions = await fetchIndexerRegisterPage(offset);
+            versions.push(...pageVersions);
+            if (pageVersions.length < INDEXER_PAGE_SIZE) break;
+        } catch (error) {
+            if (versions.length === 0) throw error;
+            console.warn("Partial Aptos indexer pagination failed.", error);
+            break;
+        }
+    }
+
+    return versions;
+}
+
+async function fetchTransactionByVersion(
+    version: number | string
+): Promise<AptosTransaction> {
+    let response = await fetchWithRetry(
+        `${APTOS_NODE_URL}/transactions/by_version/${version}`,
+        { headers: getAptosHeaders(), cache: "no-store" }
+    );
+
+    if (response.status === 401 && APTOS_API_KEY) {
+        response = await fetchWithRetry(
+            `${APTOS_NODE_URL}/transactions/by_version/${version}`,
+            { cache: "no-store" }
+        );
+    }
+
+    if (!response.ok) {
+        throw new Error(`Aptos HTTP ${response.status}: ${response.statusText}`);
+    }
+
+    return (await response.json()) as AptosTransaction;
 }
 
 async function mapWithConcurrency<T, R>(
@@ -143,6 +258,57 @@ async function enrichRecentPrompts(
     return prompts.map((prompt) => enrichedById.get(prompt.promptId) ?? prompt);
 }
 
+async function fetchModuleAccountTransactions(): Promise<AptosTransaction[]> {
+    let txResp = await fetchWithRetry(
+        `${APTOS_NODE_URL}/accounts/${MODULE_ADDRESS}/transactions?limit=${TRANSACTION_SCAN_LIMIT}`,
+        { headers: getAptosHeaders(), cache: "no-store" }
+    );
+
+    if (txResp.status === 401 && APTOS_API_KEY) {
+        txResp = await fetchWithRetry(
+            `${APTOS_NODE_URL}/accounts/${MODULE_ADDRESS}/transactions?limit=${TRANSACTION_SCAN_LIMIT}`,
+            { cache: "no-store" }
+        );
+    }
+
+    if (!txResp.ok) {
+        throw new Error(`Aptos HTTP ${txResp.status}: ${txResp.statusText}`);
+    }
+
+    return (await txResp.json()) as AptosTransaction[];
+}
+
+async function fetchRegistryTransactions(): Promise<AptosTransaction[]> {
+    try {
+        const versions = await fetchIndexerRegisterVersions();
+        if (versions.length === 0) return fetchModuleAccountTransactions();
+
+        const indexerTransactions = await mapWithConcurrency(
+            versions,
+            TRANSACTION_FETCH_CONCURRENCY,
+            fetchTransactionByVersion
+        );
+        const moduleTransactions = await fetchModuleAccountTransactions().catch(
+            () => []
+        );
+        const seenVersions = new Set<string>();
+
+        return [...indexerTransactions, ...moduleTransactions].filter((tx) => {
+            const version = tx.version?.toString();
+            if (!version) return true;
+            if (seenVersions.has(version)) return false;
+            seenVersions.add(version);
+            return true;
+        });
+    } catch (error) {
+        console.warn(
+            "Aptos indexer registry discovery failed; falling back to module account scan.",
+            error
+        );
+        return fetchModuleAccountTransactions();
+    }
+}
+
 async function loadPrompts(force = false): Promise<PromptMetadata[]> {
     if (!force && cache && Date.now() - cache.timestamp < CACHE_TTL_MS) {
         return cache.prompts;
@@ -153,30 +319,7 @@ async function loadPrompts(force = false): Promise<PromptMetadata[]> {
         const registeredTarget = `${MODULE_ADDRESS}::prompt_registry::PromptRegistered`;
         const updatedTarget = `${MODULE_ADDRESS}::prompt_registry::PromptUpdated`;
         const deactivatedTarget = `${MODULE_ADDRESS}::prompt_registry::PromptDeactivated`;
-        const headers: HeadersInit = APTOS_API_KEY
-            ? {
-                  Authorization: `Bearer ${APTOS_API_KEY}`,
-                  Origin: APTOS_API_ORIGIN,
-              }
-            : {};
-
-        let txResp = await fetchWithRetry(
-            `${APTOS_NODE_URL}/accounts/${MODULE_ADDRESS}/transactions?limit=${TRANSACTION_SCAN_LIMIT}`,
-            { headers, cache: "no-store" }
-        );
-
-        if (txResp.status === 401 && APTOS_API_KEY) {
-            txResp = await fetchWithRetry(
-                `${APTOS_NODE_URL}/accounts/${MODULE_ADDRESS}/transactions?limit=${TRANSACTION_SCAN_LIMIT}`,
-                { cache: "no-store" }
-            );
-        }
-
-        if (!txResp.ok) {
-            throw new Error(`Aptos HTTP ${txResp.status}: ${txResp.statusText}`);
-        }
-
-        const txns = (await txResp.json()) as AptosTransaction[];
+        const txns = await fetchRegistryTransactions();
         const registered = new Map<string, PromptMetadata>();
         const deactivated = new Set<string>();
         const updatedPrices = new Map<string, number>();
