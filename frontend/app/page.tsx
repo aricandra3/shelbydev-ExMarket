@@ -1,35 +1,11 @@
 /// Landing Page — ExMarket Hero
 
-"use client";
-
 import Link from "next/link";
-import { useWallet } from "@aptos-labs/wallet-adapter-react";
-import { motion, useReducedMotion } from "framer-motion";
-import type { Variants } from "framer-motion";
 import { ArrowRight, Coins, Cuboid, ShieldCheck, Sparkles, UploadCloud } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { buttonVariants } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/buttonStyles";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-
-// ── Animation ─────────────────────────────────────────────
-const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
-
-const getStagger = (reduceMotion: boolean): Variants => ({
-    hidden: {},
-    show: reduceMotion
-        ? {}
-        : { transition: { staggerChildren: 0.1, delayChildren: 0.05 } },
-});
-
-const getRise = (reduceMotion: boolean): Variants => ({
-    hidden: reduceMotion ? { opacity: 1, y: 0 } : { opacity: 0, y: 18 },
-    show: {
-        opacity: 1,
-        y: 0,
-        transition: reduceMotion ? { duration: 0 } : { duration: 0.65, ease: EASE },
-    },
-});
 
 // ── Data ──────────────────────────────────────────────────
 const STATS = [
@@ -58,11 +34,6 @@ const FEATURES = [
 
 // ── Component ─────────────────────────────────────────────
 export default function HomePage() {
-    const { connected } = useWallet();
-    const shouldReduceMotion = Boolean(useReducedMotion());
-    const stagger = getStagger(shouldReduceMotion);
-    const rise = getRise(shouldReduceMotion);
-
     return (
         <div className="flex flex-col">
 
@@ -71,62 +42,45 @@ export default function HomePage() {
                 <div aria-hidden className="absolute bottom-12 left-0 h-12 w-2/5 rotate-2 border-y-2 border-r-2 border-ink/85 bg-retro-cyan/25" />
                 <div aria-hidden className="halftone absolute right-4 top-32 hidden h-36 w-36 opacity-25 md:block" />
 
-                <motion.div
-                    className="relative z-10 mx-auto grid min-h-[70vh] max-w-7xl items-center gap-10 lg:grid-cols-2"
-                    variants={stagger}
-                    initial="hidden"
-                    animate="show"
-                >
+                <div className="relative z-10 mx-auto grid min-h-[70vh] max-w-7xl items-center gap-10 animate-fade-in lg:grid-cols-2">
                     <div>
-                        <motion.div variants={rise} className="mb-6">
+                        <div className="mb-6">
                             <Badge variant="warning" className="shadow-neo-sm">
                                 <Sparkles className="h-3.5 w-3.5" />
                                 Shelby Protocol / Aptos
                             </Badge>
-                        </motion.div>
+                        </div>
 
-                        <motion.h1
-                            variants={rise}
+                        <h1
                             className="mb-5 max-w-3xl font-display text-[3.1rem] font-black leading-[0.92] text-cream sm:text-[4.25rem] lg:text-[5rem]"
                             style={{ textShadow: "5px 5px 0 #111111" }}
                         >
                             ExMarket{" "}
                             <span className="block text-retro-yellow">Prompt Marketplace</span>
-                        </motion.h1>
+                        </h1>
 
-                        <motion.p
-                            variants={rise}
-                            className="mb-6 max-w-xl text-base font-semibold leading-relaxed text-cream/70 sm:text-lg"
-                        >
+                        <p className="mb-6 max-w-xl text-base font-semibold leading-relaxed text-cream/70 sm:text-lg">
                             A retro-frosted marketplace for premium AI prompts, creator workflows,
                             and unlockable knowledge on-chain.
-                        </motion.p>
+                        </p>
 
-                        <motion.div
-                            variants={rise}
-                            className="mb-10 flex flex-wrap items-center gap-3"
-                        >
+                        <div className="mb-10 flex flex-wrap items-center gap-3">
                             <Link
-                                href={connected ? "/create" : "/explore"}
+                                href="/explore"
                                 className={buttonVariants({ size: "lg" })}
                             >
-                                {connected ? "Upload Prompt" : "Browse Market"}
+                                Browse Market
                                 <ArrowRight className="h-4 w-4" />
                             </Link>
-                            {!connected && (
-                                <Link
-                                    href="/create"
-                                    className={buttonVariants({ variant: "outline", size: "lg" })}
-                                >
-                                    Sell Prompts
-                                </Link>
-                            )}
-                        </motion.div>
+                            <Link
+                                href="/create"
+                                className={buttonVariants({ variant: "outline", size: "lg" })}
+                            >
+                                Sell Prompts
+                            </Link>
+                        </div>
 
-                        <motion.div
-                            variants={rise}
-                            className="grid max-w-2xl grid-cols-3 overflow-hidden rounded-[8px] border-2 border-ink bg-cream/[0.08] shadow-neo backdrop-blur-xl"
-                        >
+                        <div className="grid max-w-2xl grid-cols-3 overflow-hidden rounded-[8px] border-2 border-ink bg-cream/[0.08] shadow-neo backdrop-blur-xl">
                             {STATS.map((s, index) => (
                                 <div key={s.label} className="p-4">
                                     <span className="block text-2xl font-black text-retro-yellow tabular-nums">
@@ -140,13 +94,10 @@ export default function HomePage() {
                                     )}
                                 </div>
                             ))}
-                        </motion.div>
+                        </div>
                     </div>
 
-                    <motion.div
-                        variants={rise}
-                        className="absolute right-3 top-24 hidden w-[min(36vw,28rem)] lg:block xl:right-10 xl:top-28"
-                    >
+                    <div className="absolute right-3 top-24 hidden w-[min(36vw,28rem)] lg:block xl:right-10 xl:top-28">
                         <Card className="mx-auto w-full max-w-md rotate-2 bg-cream/[0.1] p-0 transition-transform duration-200 hover:rotate-0">
                             <CardHeader className="border-b-2 border-ink bg-retro-mint/90 text-ink">
                                 <div className="flex items-center justify-between gap-4">
@@ -179,8 +130,8 @@ export default function HomePage() {
                                 </div>
                             </CardContent>
                         </Card>
-                    </motion.div>
-                </motion.div>
+                    </div>
+                </div>
             </section>
 
             <section className="relative px-4 pb-24 md:px-6">
@@ -192,18 +143,9 @@ export default function HomePage() {
                     <Separator className="bg-cream/20" />
                 </div>
 
-                <motion.div
-                    className="mx-auto grid max-w-6xl grid-cols-1 gap-5 sm:grid-cols-3"
-                    variants={stagger}
-                    initial="hidden"
-                    whileInView="show"
-                    viewport={{ once: true, margin: "-60px" }}
-                >
+                <div className="mx-auto grid max-w-6xl grid-cols-1 gap-5 sm:grid-cols-3">
                     {FEATURES.map((f, i) => (
-                        <motion.div
-                            key={i}
-                            variants={rise}
-                        >
+                        <div key={i} className="animate-slide-up">
                             <Card className="group h-full transition-transform duration-200 hover:-translate-x-1 hover:-translate-y-1">
                                 <CardContent className="flex h-full flex-col gap-5 p-6">
                                     <div className="flex items-start justify-between">
@@ -224,9 +166,9 @@ export default function HomePage() {
                                     </div>
                                 </CardContent>
                             </Card>
-                        </motion.div>
+                        </div>
                     ))}
-                </motion.div>
+                </div>
             </section>
 
         </div>

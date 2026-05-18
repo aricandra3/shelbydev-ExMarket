@@ -8,7 +8,7 @@ import {
     MODULE_ADDRESS,
     MODULES,
 } from "@/lib/constants";
-import { viewFunction } from "@/lib/aptos";
+import { viewFunctionServer } from "@/lib/aptosServer";
 import { isRateLimitError, truncateAddress } from "@/lib/utils";
 import type { PromptMetadata } from "@/types";
 import { checkRateLimit, rateLimitHeaders } from "@/lib/apiSecurity";
@@ -206,7 +206,7 @@ async function enrichPromptMetadata(
     useCache: boolean
 ): Promise<PromptMetadata> {
     try {
-        const result = await viewFunction<any[]>(
+        const result = await viewFunctionServer<any[]>(
             `${MODULES.PROMPT_REGISTRY}::get_prompt_metadata`,
             [prompt.promptId],
             [],

@@ -8,12 +8,12 @@ import {
     Ed25519PublicKey,
     Ed25519Signature,
 } from "@aptos-labs/ts-sdk";
-import { hasAccess, getPromptBlobId } from "@/lib/contracts";
+import { hasAccessServer, getPromptBlobIdServer } from "@/lib/contractsServer";
 import { shelbyService } from "@/lib/shelby";
 import { isRateLimitError } from "@/lib/utils";
 import { checkRateLimit, rateLimitHeaders } from "@/lib/apiSecurity";
 
-export const runtime = "edge";
+export const runtime = "nodejs";
 
 const WALLET_PROOF_MAX_AGE_MS = 5 * 60 * 1000;
 const WALLET_PROOF_CLOCK_SKEW_MS = 30 * 1000;
@@ -248,7 +248,7 @@ export async function GET(req: NextRequest, { params }: PromptRouteContext) {
         }
 
         // 2. Check on-chain access
-        const accessGranted = await hasAccess(normalizedWalletAddress, promptId);
+        const accessGranted = await hasAccessServer(normalizedWalletAddress, promptId);
         if (!accessGranted) {
             return NextResponse.json(
                 {
@@ -261,7 +261,7 @@ export async function GET(req: NextRequest, { params }: PromptRouteContext) {
         }
 
         // 3. Get blob ID from on-chain metadata
-        const blobId = await getPromptBlobId(promptId);
+        const blobId = await getPromptBlobIdServer(promptId);
         if (!blobId) {
             return NextResponse.json(
                 { error: "Prompt blob not found" },

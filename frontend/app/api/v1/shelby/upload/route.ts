@@ -1,0 +1,230 @@
+/// API Route: Server-side Shelby encrypted blob upload
+/// Keeps SHELBY_API_KEY private while avoiding anonymous RPC rate limits.
+
+import { NextRequest, NextResponse } from "next/server";
+import { SHELBY_RPC_URL } from "@/lib/constants";
+import { checkRateLimit, rateLimitHeaders } from "@/lib/apiSecurity";
+
+export const dynamic = "force-dynamic";
+
+const SHELBY_API_KEY = process.env.SHELBY_API_KEY || "";
+const SHELBY_START_TIMEOUT_MS = 20_000;
+const SHELBY_PART_TIMEOUT_MS = 30_000;
+const SHELBY_COMPLETE_TIMEOUT_MS = 60_000;
+const MAX_ENCRYPTED_PAYLOAD_BYTES = 2_000_000;
+
+type ShelbyUploadBody = {
+    account?: unknown;
+    blobName?: unknown;
+    ciphertextHex?: unknown;
+    domainHex?: unknown;
+};
+
+function buildRpcUrl(path: string) {
+    const normalizedBase = SHELBY_RPC_URL.endsWith("/")
+        ? SHELBY_RPC_URL
+        : `${SHELBY_RPC_URL}/`;
+    return new URL(path.replace(/^\//, ""), normalizedBase);
+}
+
+function getRpcHeaders(contentType: string): HeadersInit {
+    return {
+        "Content-Type": contentType,
+        ...(SHELBY_API_KEY ? { Authorization: `Bearer ${SHELBY_API_KEY}` } : {}),
+    };
+}
+
+async function fetchWithTimeout(
+    url: URL,
+    init: RequestInit,
+    timeoutMs: number,
+    label: string
+) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+        return await fetch(url, {
+            ...init,
+            signal: controller.signal,
+        });
+    } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") {
+            throw new Error(`${label} timed out. Shelby RPC did not respond in time.`);
+        }
+
+        throw error;
+    } finally {
+        clearTimeout(timeout);
+    }
+}
+
+async function readErrorBody(response: Response) {
+    try {
+        return await response.text();
+    } catch {
+        return "Could not read error body";
+    }
+}
+
+function isHex(value: string) {
+    return /^[a-fA-F0-9]+$/.test(value);
+}
+
+function validateUploadBody(body: ShelbyUploadBody) {
+    if (
+        typeof body.account !== "string" ||
+        typeof body.blobName !== "string" ||
+        typeof body.ciphertextHex !== "string" ||
+        typeof body.domainHex !== "string"
+    ) {
+        return "Invalid Shelby upload request.";
+    }
+
+    if (!/^0x[a-fA-F0-9]{1,64}$/.test(body.account)) {
+        return "Invalid Shelby account address.";
+    }
+
+    if (!body.blobName.trim() || body.blobName.length > 180) {
+        return "Invalid Shelby blob name.";
+    }
+
+    if (!isHex(body.ciphertextHex) || !isHex(body.domainHex)) {
+        return "Encrypted Shelby payload must be hex encoded.";
+    }
+
+    const payloadBytes = new TextEncoder().encode(
+        JSON.stringify({
+            ciphertextHex: body.ciphertextHex,
+            domainHex: body.domainHex,
+        })
+    );
+
+    if (payloadBytes.length > MAX_ENCRYPTED_PAYLOAD_BYTES) {
+        return "Encrypted Shelby payload is too large.";
+    }
+
+    return null;
+}
+
+export async function POST(req: NextRequest) {
+    const rateLimit = checkRateLimit(req.headers, {
+        namespace: "api-shelby-upload",
+        limit: 30,
+        windowMs: 60_000,
+    });
+
+    if (rateLimit.limited) {
+        return NextResponse.json(
+            { error: "Too many Shelby upload requests. Please retry shortly." },
+            { status: 429, headers: rateLimitHeaders(rateLimit) }
+        );
+    }
+
+    let body: ShelbyUploadBody;
+    try {
+        body = (await req.json()) as ShelbyUploadBody;
+    } catch {
+        return NextResponse.json(
+            { error: "Invalid Shelby upload request." },
+            { status: 400, headers: rateLimitHeaders(rateLimit) }
+        );
+    }
+
+    const validationError = validateUploadBody(body);
+    if (validationError) {
+        return NextResponse.json(
+            { error: validationError },
+            { status: 400, headers: rateLimitHeaders(rateLimit) }
+        );
+    }
+
+    const account = body.account as string;
+    const blobName = body.blobName as string;
+    const payloadBytes = new TextEncoder().encode(
+        JSON.stringify({
+            ciphertextHex: body.ciphertextHex,
+            domainHex: body.domainHex,
+        })
+    );
+
+    try {
+        const startResponse = await fetchWithTimeout(
+            buildRpcUrl("/v1/multipart-uploads"),
+            {
+                method: "POST",
+                headers: getRpcHeaders("application/json"),
+                body: JSON.stringify({
+                    rawAccount: account,
+                    rawBlobName: blobName,
+                    rawPartSize: payloadBytes.length || 1,
+                }),
+            },
+            SHELBY_START_TIMEOUT_MS,
+            "Starting Shelby upload"
+        );
+
+        if (!startResponse.ok) {
+            return NextResponse.json(
+                {
+                    error: `Failed to start Shelby upload. status: ${startResponse.status}, body: ${await readErrorBody(startResponse)}`,
+                },
+                { status: startResponse.status, headers: rateLimitHeaders(rateLimit) }
+            );
+        }
+
+        const { uploadId } = (await startResponse.json()) as { uploadId?: string };
+        if (!uploadId) throw new Error("Shelby upload did not return an upload id.");
+
+        const partResponse = await fetchWithTimeout(
+            buildRpcUrl(`/v1/multipart-uploads/${uploadId}/parts/0`),
+            {
+                method: "PUT",
+                headers: getRpcHeaders("application/octet-stream"),
+                body: payloadBytes,
+            },
+            SHELBY_PART_TIMEOUT_MS,
+            "Uploading encrypted content to Shelby"
+        );
+
+        if (!partResponse.ok) {
+            return NextResponse.json(
+                {
+                    error: `Failed to upload Shelby part. status: ${partResponse.status}, body: ${await readErrorBody(partResponse)}`,
+                },
+                { status: partResponse.status, headers: rateLimitHeaders(rateLimit) }
+            );
+        }
+
+        const completeResponse = await fetchWithTimeout(
+            buildRpcUrl(`/v1/multipart-uploads/${uploadId}/complete`),
+            {
+                method: "POST",
+                headers: getRpcHeaders("application/json"),
+            },
+            SHELBY_COMPLETE_TIMEOUT_MS,
+            "Finalizing Shelby upload"
+        );
+
+        if (!completeResponse.ok) {
+            return NextResponse.json(
+                {
+                    error: `Failed to finalize Shelby upload. status: ${completeResponse.status}, body: ${await readErrorBody(completeResponse)}`,
+                },
+                { status: completeResponse.status, headers: rateLimitHeaders(rateLimit) }
+            );
+        }
+
+        return NextResponse.json(
+            { ok: true },
+            { headers: rateLimitHeaders(rateLimit) }
+        );
+    } catch (error: unknown) {
+        const message =
+            error instanceof Error ? error.message : "Shelby upload failed.";
+        return NextResponse.json(
+            { error: message },
+            { status: 502, headers: rateLimitHeaders(rateLimit) }
+        );
+    }
+}

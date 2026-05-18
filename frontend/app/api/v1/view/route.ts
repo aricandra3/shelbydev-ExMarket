@@ -3,7 +3,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { MODULES } from "@/lib/constants";
-import { viewFunction } from "@/lib/aptos";
+import { viewFunctionServer } from "@/lib/aptosServer";
 import { isRateLimitError } from "@/lib/utils";
 import { checkRateLimit, rateLimitHeaders } from "@/lib/apiSecurity";
 
@@ -71,7 +71,7 @@ export async function POST(req: NextRequest) {
     }
 
     try {
-        const result = await viewFunction(
+        const result = await viewFunctionServer(
             body.functionName,
             body.args,
             body.typeArgs ?? [],

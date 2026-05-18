@@ -4,7 +4,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useWallet } from "@aptos-labs/wallet-adapter-react";
+import { useAppWallet } from "@/components/wallet/walletContext";
 import { ConnectButton } from "@/components/wallet/ConnectButton";
 import { cn } from "@/lib/utils";
 import { LayoutDashboard, Library, Search, Upload } from "lucide-react";
@@ -18,7 +18,7 @@ const NAV_LINKS = [
 
 export function Navbar() {
     const pathname = usePathname();
-    const { connected } = useWallet();
+    const { connected } = useAppWallet();
 
     return (
         <nav className="sticky top-0 z-50 px-4 py-4">

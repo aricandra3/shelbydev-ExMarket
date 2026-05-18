@@ -3,28 +3,20 @@
 "use client";
 
 import { AptosWalletAdapterProvider } from "@aptos-labs/wallet-adapter-react";
-import { Network } from "@aptos-labs/ts-sdk";
+import { useWallet } from "@aptos-labs/wallet-adapter-react";
 import { NETWORK } from "@/lib/constants";
-import { type ReactNode, useCallback, useEffect, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import {
+    AppWalletContext,
+    type AppWalletContextValue,
+} from "@/components/wallet/walletContext";
+import { resetWalletStorage, sanitizeWalletStorage } from "@/components/wallet/walletStorage";
 
-const networkMap: Record<string, Network> = {
-    mainnet: Network.MAINNET,
-    testnet: Network.TESTNET,
-    devnet: Network.DEVNET,
+const networkMap: Record<string, string> = {
+    mainnet: "mainnet",
+    testnet: "testnet",
+    devnet: "devnet",
 };
-
-const WALLET_STORAGE_KEYS_TO_RESET = [
-    "AptosWalletName",
-    "@aptos-connect/connectedAccount",
-    "@aptos-connect/dapp-local-state",
-    "icDappPairings",
-];
-
-const WALLET_JSON_STORAGE_KEYS = [
-    "@aptos-connect/connectedAccount",
-    "@aptos-connect/dapp-local-state",
-    "icDappPairings",
-];
 
 function getWalletErrorMessage(error: unknown) {
     if (typeof error === "string") return error;
@@ -43,28 +35,42 @@ function isStorageJsonParseError(message: string) {
     );
 }
 
-export function resetWalletStorage() {
-    if (typeof window === "undefined") return;
+function WalletStateBridge({ children }: { children: ReactNode }) {
+    const walletState = useWallet();
+    const value = useMemo<AppWalletContextValue>(
+        () => ({
+            account: walletState.account ?? null,
+            connected: walletState.connected,
+            connect: (walletName: string) => walletState.connect(walletName),
+            disconnect: () => walletState.disconnect(),
+            isLoading: walletState.isLoading,
+            signAndSubmitTransaction: (args: any) =>
+                walletState.signAndSubmitTransaction(args),
+            signMessage: (args: any) => walletState.signMessage(args),
+            wallet: walletState.wallet ?? null,
+            wallets: [...(walletState.wallets ?? [])].map((wallet) => ({
+                name: wallet.name,
+                readyState: wallet.readyState,
+            })),
+        }),
+        [
+            walletState.account,
+            walletState.connected,
+            walletState.connect,
+            walletState.disconnect,
+            walletState.isLoading,
+            walletState.signAndSubmitTransaction,
+            walletState.signMessage,
+            walletState.wallet,
+            walletState.wallets,
+        ]
+    );
 
-    WALLET_STORAGE_KEYS_TO_RESET.forEach((key) => {
-        window.localStorage.removeItem(key);
-    });
-}
-
-function sanitizeWalletStorage() {
-    if (typeof window === "undefined") return;
-
-    for (const key of WALLET_JSON_STORAGE_KEYS) {
-        const value = window.localStorage.getItem(key);
-        if (!value) continue;
-
-        try {
-            JSON.parse(value);
-        } catch {
-            resetWalletStorage();
-            return;
-        }
-    }
+    return (
+        <AppWalletContext.Provider value={value}>
+            {children}
+        </AppWalletContext.Provider>
+    );
 }
 
 export function WalletProvider({ children }: { children: ReactNode }) {
@@ -95,11 +101,11 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         <AptosWalletAdapterProvider
             autoConnect={true}
             dappConfig={{
-                network: networkMap[NETWORK] || Network.TESTNET,
+                network: (networkMap[NETWORK] || "testnet") as any,
             }}
             onError={handleWalletError}
         >
-            {children}
+            <WalletStateBridge>{children}</WalletStateBridge>
         </AptosWalletAdapterProvider>
     );
 }

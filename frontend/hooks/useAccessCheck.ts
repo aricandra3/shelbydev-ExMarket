@@ -3,11 +3,11 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useWallet } from "@aptos-labs/wallet-adapter-react";
+import { useAppWallet } from "@/components/wallet/walletContext";
 import { hasAccess as checkAccess, getApiCallsRemaining } from "@/lib/contracts";
 
 export function useAccessCheck(promptId: string | null) {
-    const { account } = useWallet();
+    const { account } = useAppWallet();
     const accountAddress = account?.address?.toString();
     const [hasAccessResult, setHasAccess] = useState(false);
     const [apiCallsRemaining, setApiCallsRemaining] = useState(0);

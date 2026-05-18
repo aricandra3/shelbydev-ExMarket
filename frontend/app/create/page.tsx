@@ -5,16 +5,13 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { useWallet } from "@aptos-labs/wallet-adapter-react";
-import { aptosClient } from "@/lib/aptos";
+import { useAppWallet } from "@/components/wallet/walletContext";
+import { waitForTransaction } from "@/lib/aptos";
 import { buildRegisterPromptPayload, buildUpdateBlobIdPayload, getCreatorPrompts } from "@/lib/contracts";
 import { invalidatePromptRegistryCache } from "@/lib/promptRegistry";
 import { aptToOctas, PROMPT_CATEGORIES } from "@/lib/constants";
 import { PRICING_MODEL_REVERSE } from "@/types";
 import type { PricingModel } from "@/types";
-import { AccountAddress } from "@aptos-labs/ts-sdk";
-import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
-import { aceEncrypt } from "@/lib/ace";
 import { getErrorMessage } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -23,16 +20,54 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { CalendarClock, CheckCircle2, Eye, Send, Unlock, Zap } from "lucide-react";
 
-const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
 const MAX_TITLE_LENGTH = 120;
 const MAX_DESCRIPTION_LENGTH = 520;
 const MAX_TAGS_LENGTH = 180;
 const MAX_CONTENT_LENGTH = 12_000;
 
+type PublishStep =
+    | "form"
+    | "registering-prompt"
+    | "encrypting"
+    | "registering-blob"
+    | "uploading-blob"
+    | "finalizing-blob"
+    | "updating-prompt"
+    | "success"
+    | "error";
+
+type PublishRecovery = {
+    promptId: string;
+    blobName: string;
+    ciphertextHex: string;
+    domainHex: string;
+    accountAddress: string;
+};
+
+const BUSY_STEPS = new Set<PublishStep>([
+    "registering-prompt",
+    "encrypting",
+    "registering-blob",
+    "uploading-blob",
+    "finalizing-blob",
+    "updating-prompt",
+]);
+
+const PUBLISH_STEP_LABELS: Record<PublishStep, string> = {
+    form: "Publish Prompt",
+    "registering-prompt": "Confirming listing tx...",
+    encrypting: "Encrypting content...",
+    "registering-blob": "Registering Shelby blob...",
+    "uploading-blob": "Uploading to Shelby...",
+    "finalizing-blob": "Finalizing Shelby upload...",
+    "updating-prompt": "Linking content on-chain...",
+    success: "Published",
+    error: "Try Again",
+};
+
 export default function CreatePage() {
     const router = useRouter();
-    const { account, connected, signAndSubmitTransaction } = useWallet();
-    const shouldReduceMotion = useReducedMotion();
+    const { account, connected, signAndSubmitTransaction } = useAppWallet();
     const accountAddress = account?.address?.toString();
 
     const [form, setForm] = useState({
@@ -45,17 +80,88 @@ export default function CreatePage() {
         content: "",
     });
 
-    const [step, setStep] = useState<
-        "form" | "uploading" | "registering" | "success" | "error"
-    >("form");
+    const [step, setStep] = useState<PublishStep>("form");
     const [error, setError] = useState("");
+    const [statusDetail, setStatusDetail] = useState("");
     const [txHash, setTxHash] = useState("");
+    const [recovery, setRecovery] = useState<PublishRecovery | null>(null);
+    const isBusy = BUSY_STEPS.has(step);
+    const submitLabel =
+        step === "error" && recovery
+            ? "Retry Finalize Upload"
+            : PUBLISH_STEP_LABELS[step];
+
+    const finalizePublish = async (publish: PublishRecovery) => {
+        if (!accountAddress || publish.accountAddress !== accountAddress) {
+            throw new Error("Reconnect the same wallet to finish this publish.");
+        }
+
+        const { shelbyService } = await import("@/lib/shelby");
+
+        setStep("uploading-blob");
+        setStatusDetail("Uploading encrypted content to Shelby RPC...");
+
+        try {
+            await shelbyService.putEncryptedBlob(
+                publish.ciphertextHex,
+                publish.domainHex,
+                publish.accountAddress,
+                publish.blobName,
+                (progress) => {
+                    if (progress.phase === "finalizing") {
+                        setStep("finalizing-blob");
+                        setStatusDetail(
+                            "Finalizing Shelby multipart upload. If Shelby RPC is slow, this is the step that used to hang."
+                        );
+                        return;
+                    }
+
+                    if (progress.phase === "complete") {
+                        setStatusDetail("Shelby upload complete. Preparing final on-chain link...");
+                        return;
+                    }
+
+                    setStep("uploading-blob");
+                    setStatusDetail("Uploading encrypted content to Shelby RPC...");
+                }
+            );
+        } catch (err: unknown) {
+            const message = getErrorMessage(err, "");
+            if (!/(already|exists|duplicate|409)/i.test(message)) throw err;
+            setStatusDetail("Shelby blob is already uploaded. Continuing to final on-chain link...");
+        }
+
+        const blobId = `${publish.accountAddress}/${publish.blobName}`;
+        setStep("updating-prompt");
+        setStatusDetail("Waiting for wallet signature for tx 3: link blob_id to prompt...");
+
+        const updatePayload = buildUpdateBlobIdPayload(publish.promptId, blobId);
+        const updateResponse = await signAndSubmitTransaction({ data: updatePayload });
+
+        setStatusDetail("Confirming tx 3 on-chain...");
+        await waitForTransaction(updateResponse.hash, { checkSuccess: true });
+
+        invalidatePromptRegistryCache();
+        setTxHash(updateResponse.hash);
+        setRecovery(null);
+        setStatusDetail("");
+        setStep("success");
+    };
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!connected || !account) return;
+        if (!connected || !account || !accountAddress) return;
 
         setError("");
+        if (step === "error" && recovery) {
+            try {
+                await finalizePublish(recovery);
+            } catch (err: unknown) {
+                setError(getErrorMessage(err, "Could not finish publishing."));
+                setStep("error");
+            }
+            return;
+        }
 
         const title = form.title.trim();
         const description = form.description.trim();
@@ -75,7 +181,9 @@ export default function CreatePage() {
         }
 
         try {
-            setStep("registering");
+            setStep("registering-prompt");
+            setRecovery(null);
+            setStatusDetail("Waiting for wallet signature for tx 1: create prompt listing...");
 
             const tags = form.tags
                 .split(",")
@@ -101,13 +209,12 @@ export default function CreatePage() {
             );
 
             const registerResponse = await signAndSubmitTransaction({ data: payload });
-            await aptosClient.waitForTransaction({
-                transactionHash: registerResponse.hash,
-                options: { checkSuccess: true } as any,
-            });
+            setStatusDetail("Confirming tx 1 on-chain...");
+            await waitForTransaction(registerResponse.hash, { checkSuccess: true });
 
             // Fetch the real prompt_id: it's the last address in creator's prompts list
-            const creatorPrompts = await getCreatorPrompts(account.address.toString(), {
+            setStatusDetail("Reading the new prompt id from Aptos...");
+            const creatorPrompts = await getCreatorPrompts(accountAddress, {
                 fresh: true,
             });
             if (!creatorPrompts || creatorPrompts.length === 0) {
@@ -118,9 +225,11 @@ export default function CreatePage() {
             // ─── PHASE 2: ACE-encrypt with the REAL on-chain prompt_id ────────
             // Now the domain encodes the actual Object address, so ACE workers
             // can call has_access(buyer_address, prompt_id) and get the correct result.
-            setStep("uploading");
+            setStep("encrypting");
+            setStatusDetail("Encrypting prompt content with ACE...");
 
             const blobName = `prompt_${Date.now()}.txt`;
+            const { aceEncrypt } = await import("@/lib/ace");
             const { ciphertextHex, domainHex } = await aceEncrypt(content, promptId);
             const encryptedPayload = JSON.stringify({ ciphertextHex, domainHex });
             const uploadBytes = new TextEncoder().encode(encryptedPayload);
@@ -132,8 +241,8 @@ export default function CreatePage() {
                 ShelbyBlobClient,
                 defaultErasureCodingConfig,
                 expectedTotalChunksets,
-                shelbyService,
             } = await import("@/lib/shelby");
+            const { AccountAddress } = await import("@aptos-labs/ts-sdk");
 
             const erasureCodingConfig = defaultErasureCodingConfig();
             const provider = await createDefaultErasureCodingProvider();
@@ -143,10 +252,11 @@ export default function CreatePage() {
             const numChunksets = expectedTotalChunksets(uploadBytes.length, chunksetSize);
 
             // ─── PHASE 4: Register blob on Shelby L1 ─────────────────────────
-            setStep("registering");
+            setStep("registering-blob");
+            setStatusDetail("Waiting for wallet signature for tx 2: register Shelby blob...");
 
             const shelbyPayload = ShelbyBlobClient.createRegisterBlobPayload({
-                account: AccountAddress.fromString(account.address.toString()),
+                account: AccountAddress.fromString(accountAddress),
                 blobName,
                 blobSize: uploadBytes.length,
                 blobMerkleRoot: commitments.blob_merkle_root,
@@ -156,37 +266,24 @@ export default function CreatePage() {
             });
 
             const shelbyResponse = await signAndSubmitTransaction({ data: shelbyPayload });
-            await aptosClient.waitForTransaction({
-                transactionHash: shelbyResponse.hash,
-                options: { checkSuccess: true, waitForIndexer: true } as any,
+            setStatusDetail("Confirming tx 2 and waiting for Shelby indexer...");
+            await waitForTransaction(shelbyResponse.hash, {
+                checkSuccess: true,
+                waitForIndexer: true,
             });
 
+            setStatusDetail("Preparing Shelby RPC upload...");
             await new Promise((resolve) => setTimeout(resolve, 3000));
 
-            // ─── PHASE 5: Upload encrypted blob via Shelby RPC ───────────────
-            setStep("uploading");
-
-            await shelbyService.putEncryptedBlob(
+            const recoveryData: PublishRecovery = {
+                promptId,
+                blobName,
                 ciphertextHex,
                 domainHex,
-                account.address.toString(),
-                blobName
-            );
-            const blobId = `${account.address.toString()}/${blobName}`;
-            if (!blobId) throw new Error("Failed to upload encrypted blob");
-
-            // ─── PHASE 6: Update blob_id on-chain (replace "pending") ─────────
-            setStep("registering");
-
-            const updatePayload = buildUpdateBlobIdPayload(promptId, blobId);
-            const updateResponse = await signAndSubmitTransaction({ data: updatePayload });
-            await aptosClient.waitForTransaction({
-                transactionHash: updateResponse.hash,
-            });
-
-            invalidatePromptRegistryCache();
-            setTxHash(updateResponse.hash);
-            setStep("success");
+                accountAddress,
+            };
+            setRecovery(recoveryData);
+            await finalizePublish(recoveryData);
         } catch (err: unknown) {
             setError(getErrorMessage(err, "Something went wrong while publishing."));
             setStep("error");
@@ -197,11 +294,7 @@ export default function CreatePage() {
     if (!connected) {
         return (
             <div className="mx-auto max-w-2xl px-4 py-16 sm:px-6 lg:px-8">
-                <motion.div
-                    initial={shouldReduceMotion ? { opacity: 1, scale: 1 } : { opacity: 0, scale: 0.95 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    transition={shouldReduceMotion ? { duration: 0 } : { duration: 0.3, ease: EASE }}
-                >
+                <div className="animate-slide-up">
                     <Card className="p-12 text-center">
                         <Badge variant="warning" className="mb-5 shadow-neo-sm">
                             Creator Gate
@@ -213,7 +306,7 @@ export default function CreatePage() {
                             Connect your Aptos wallet to start creating prompts.
                         </p>
                     </Card>
-                </motion.div>
+                </div>
             </div>
         );
     }
@@ -235,15 +328,8 @@ export default function CreatePage() {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
                 {/* Left side Start - Form */}
                 <div className="space-y-8 relative">
-                    <AnimatePresence mode="wait">
-                        {step === "success" ? (
-                            <motion.div
-                                key="success"
-                                initial={shouldReduceMotion ? { opacity: 1, scale: 1, y: 0 } : { opacity: 0, scale: 0.95, y: 10 }}
-                                animate={{ opacity: 1, scale: 1, y: 0 }}
-                                exit={shouldReduceMotion ? { opacity: 1, scale: 1, y: 0 } : { opacity: 0, scale: 0.95, y: -10 }}
-                                transition={shouldReduceMotion ? { duration: 0 } : { duration: 0.4, ease: EASE }}
-                            >
+                    {step === "success" ? (
+                            <div className="animate-slide-up">
                                 <Card className="p-12 text-center">
                                     <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-[8px] border-2 border-ink bg-retro-lime text-ink shadow-neo">
                                         <CheckCircle2 className="h-9 w-9" />
@@ -263,15 +349,9 @@ export default function CreatePage() {
                                         Go to Dashboard
                                     </Button>
                                 </Card>
-                            </motion.div>
+                            </div>
                         ) : (
-                            <motion.div
-                                key="form"
-                                initial={shouldReduceMotion ? { opacity: 1, y: 0 } : { opacity: 0, y: 20 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                exit={shouldReduceMotion ? { opacity: 1, y: 0 } : { opacity: 0, y: -20 }}
-                                transition={shouldReduceMotion ? { duration: 0 } : { duration: 0.4, ease: EASE }}
-                            >
+                            <div className="animate-fade-in">
                                 <form onSubmit={handleSubmit} className="space-y-6">
                                     <Card className="space-y-5 p-8">
                                         {/* Title */}
@@ -416,41 +496,33 @@ export default function CreatePage() {
                                     {/* Submit */}
                                     <Button
                                         type="submit"
-                                        disabled={step === "uploading" || step === "registering"}
+                                        disabled={isBusy}
                                         className="relative flex w-full overflow-hidden py-4 text-base"
                                     >
                                         <Send className="h-4 w-4" />
-                                        <AnimatePresence mode="popLayout">
-                                            <motion.span
-                                                key={step}
-                                                initial={shouldReduceMotion ? { y: 0, opacity: 1 } : { y: 20, opacity: 0 }}
-                                                animate={{ y: 0, opacity: 1 }}
-                                                exit={shouldReduceMotion ? { y: 0, opacity: 1 } : { y: -20, opacity: 0 }}
-                                                transition={shouldReduceMotion ? { duration: 0 } : { duration: 0.3 }}
-                                                className="block"
-                                            >
-                                                {step === "form" && "Publish Prompt"}
-                                                {step === "uploading" && "Uploading to Shelby..."}
-                                                {step === "registering" && "Registering on-chain..."}
-                                                {step === "error" && "Try Again"}
-                                            </motion.span>
-                                        </AnimatePresence>
+                                        <span className="block">{submitLabel}</span>
                                     </Button>
 
+                                    {isBusy && statusDetail && (
+                                        <p className="text-center text-xs font-semibold text-cream/45">
+                                            {statusDetail}
+                                        </p>
+                                    )}
+
                                     {error && (
-                                        <motion.p
-                                            initial={shouldReduceMotion ? { opacity: 1, height: "auto" } : { opacity: 0, height: 0 }}
-                                            animate={{ opacity: 1, height: "auto" }}
-                                            transition={shouldReduceMotion ? { duration: 0 } : undefined}
-                                            className="text-center text-sm font-semibold text-accent-red"
-                                        >
+                                        <p className="text-center text-sm font-semibold text-accent-red">
                                             {error}
-                                        </motion.p>
+                                        </p>
+                                    )}
+
+                                    {step === "error" && recovery && (
+                                        <p className="text-center text-xs font-semibold text-cream/40">
+                                            Tx 1 and tx 2 already completed. Retry will continue from Shelby upload/final tx only.
+                                        </p>
                                     )}
                                 </form>
-                            </motion.div>
+                            </div>
                         )}
-                    </AnimatePresence>
                 </div>
 
                 {/* Right side Start - Live Preview */}
