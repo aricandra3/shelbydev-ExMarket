@@ -23,11 +23,29 @@ let browserCache:
     | null = null;
 let browserInFlight: Promise<RegistryLoadResult> | null = null;
 let forceNextLoad = false;
+const localPrompts = new Map<string, PromptMetadata>();
 
 function normalizeAptosAddress(address: string) {
     const trimmed = address.trim().toLowerCase();
     const hex = trimmed.startsWith("0x") ? trimmed.slice(2) : trimmed;
     return `0x${hex.padStart(64, "0")}`;
+}
+
+function normalizePromptId(promptId: string) {
+    return promptId.trim().toLowerCase();
+}
+
+function mergeLocalPrompts(prompts: PromptMetadata[]) {
+    if (localPrompts.size === 0) return prompts;
+
+    const merged = new Map(
+        prompts.map((prompt) => [normalizePromptId(prompt.promptId), prompt])
+    );
+    localPrompts.forEach((prompt, promptId) => {
+        merged.set(promptId, prompt);
+    });
+
+    return Array.from(merged.values());
 }
 
 export async function loadPromptRegistry(
@@ -44,7 +62,7 @@ export async function loadPromptRegistry(
         browserCache &&
         Date.now() - browserCache.timestamp < CACHE_TTL_MS
     ) {
-        return { prompts: browserCache.prompts };
+        return { prompts: mergeLocalPrompts(browserCache.prompts) };
     }
 
     if (!shouldRefresh && browserInFlight) return browserInFlight;
@@ -62,7 +80,7 @@ export async function loadPromptRegistry(
             }
 
             return {
-                prompts: payload.prompts ?? [],
+                prompts: mergeLocalPrompts(payload.prompts ?? []),
                 stale: payload.stale,
             };
         })
@@ -73,7 +91,7 @@ export async function loadPromptRegistry(
         .catch((error) => {
             if (browserCache) {
                 console.warn("Prompt registry refresh failed; using browser cache.", error);
-                return { prompts: browserCache.prompts, stale: true };
+                return { prompts: mergeLocalPrompts(browserCache.prompts), stale: true };
             }
 
             throw error;
@@ -89,6 +107,21 @@ export async function loadPromptRegistry(
 export function invalidatePromptRegistryCache() {
     browserCache = null;
     forceNextLoad = true;
+}
+
+export function rememberPromptInRegistry(prompt: PromptMetadata) {
+    localPrompts.set(normalizePromptId(prompt.promptId), prompt);
+    forceNextLoad = true;
+
+    if (!browserCache) {
+        browserCache = { prompts: [prompt], timestamp: Date.now() };
+        return;
+    }
+
+    browserCache = {
+        prompts: mergeLocalPrompts(browserCache.prompts),
+        timestamp: Date.now(),
+    };
 }
 
 export async function findPromptInRegistry(promptId: string) {
