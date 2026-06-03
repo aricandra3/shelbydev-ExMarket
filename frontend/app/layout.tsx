@@ -12,6 +12,7 @@ const outfit = Outfit({ subsets: ["latin"], variable: "--font-outfit" });
 
 
 export const metadata: Metadata = {
+    metadataBase: new URL("https://exmarket.vercel.app"),
     title: "ExMarket — AI Prompt Marketplace",
     description:
         "Decentralized pay-per-use AI prompt marketplace. Buy, sell, and access premium AI prompts, agent workflows, and automation templates on Aptos + Shelby.",
@@ -23,7 +24,35 @@ export const metadata: Metadata = {
         "decentralized",
         "Web3",
         "blockchain",
+        "prompt marketplace",
+        "AI agents",
     ],
+    openGraph: {
+        title: "ExMarket — AI Prompt Marketplace",
+        description:
+            "Decentralized pay-per-use AI prompt marketplace. Buy, sell, and access premium AI prompts on Aptos + Shelby.",
+        url: "https://exmarket.vercel.app",
+        siteName: "ExMarket",
+        images: [
+            {
+                url: "/og-image.png",
+                width: 1200,
+                height: 630,
+                alt: "ExMarket — AI Prompt Marketplace",
+            },
+        ],
+        type: "website",
+    },
+    twitter: {
+        card: "summary_large_image",
+        title: "ExMarket — AI Prompt Marketplace",
+        description:
+            "Decentralized pay-per-use AI prompt marketplace on Aptos + Shelby.",
+    },
+    robots: {
+        index: true,
+        follow: true,
+    },
 };
 
 export default function RootLayout({

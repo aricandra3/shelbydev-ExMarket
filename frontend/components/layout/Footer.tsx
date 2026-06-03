@@ -15,13 +15,10 @@ export function Footer() {
                     </div>
 
                     <div className="flex items-center gap-6">
-                        <a href="#" className="text-xs font-black uppercase tracking-wide text-cream/45 transition-colors hover:text-retro-yellow">
-                            Docs
-                        </a>
-                        <a href="#" className="text-xs font-black uppercase tracking-wide text-cream/45 transition-colors hover:text-retro-yellow">
+                        <a href="https://github.com/aricandra3/shelbydev-ExMarket" target="_blank" rel="noopener noreferrer" className="text-xs font-black uppercase tracking-wide text-cream/45 transition-colors hover:text-retro-yellow">
                             GitHub
                         </a>
-                        <a href="#" className="text-xs font-black uppercase tracking-wide text-cream/45 transition-colors hover:text-retro-yellow">
+                        <a href="https://twitter.com/exmarket" target="_blank" rel="noopener noreferrer" className="text-xs font-black uppercase tracking-wide text-cream/45 transition-colors hover:text-retro-yellow">
                             Twitter
                         </a>
                     </div>
