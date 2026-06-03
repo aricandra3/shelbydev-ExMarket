@@ -1,12 +1,13 @@
 /// Root Layout — App shell with wallet provider, navbar, footer
 
 import type { Metadata } from "next";
-import { Inter, Outfit } from "next/font/google";
+import { Inter, JetBrains_Mono, Outfit } from "next/font/google";
 import { ClientShell } from "@/components/ClientShell";
 import "@/styles/globals.css";
 
-const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
-const outfit = Outfit({ subsets: ["latin"], variable: "--font-outfit" });
+const inter = Inter({ subsets: ["latin"], variable: "--font-inter", display: "swap" });
+const outfit = Outfit({ subsets: ["latin"], variable: "--font-outfit", display: "swap" });
+const jetbrains = JetBrains_Mono({ subsets: ["latin"], variable: "--font-mono", display: "swap" });
 
 
 export const metadata: Metadata = {
@@ -59,7 +60,7 @@ export default function RootLayout({
     children: React.ReactNode;
 }) {
     return (
-        <html lang="en" className={`dark ${inter.variable} ${outfit.variable}`}>
+        <html lang="en" className={`dark ${inter.variable} ${outfit.variable} ${jetbrains.variable}`}>
             <body className="relative flex min-h-screen flex-col overflow-x-hidden bg-retro-paper font-sans text-cream antialiased">
                 <div aria-hidden className="fixed inset-0 w-full h-full bg-noise mix-blend-overlay" />
                 <div
