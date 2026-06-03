@@ -12,6 +12,7 @@ const SHELBY_START_TIMEOUT_MS = 20_000;
 const SHELBY_PART_TIMEOUT_MS = 30_000;
 const SHELBY_COMPLETE_TIMEOUT_MS = 60_000;
 const MAX_ENCRYPTED_PAYLOAD_BYTES = 2_000_000;
+const MIN_SHELBY_PART_SIZE_BYTES = 1_048_576;
 
 type ShelbyUploadBody = {
     account?: unknown;
@@ -157,7 +158,10 @@ export async function POST(req: NextRequest) {
                 body: JSON.stringify({
                     rawAccount: account,
                     rawBlobName: blobName,
-                    rawPartSize: payloadBytes.length || 1,
+                    rawPartSize: Math.max(
+                        payloadBytes.length,
+                        MIN_SHELBY_PART_SIZE_BYTES
+                    ),
                 }),
             },
             SHELBY_START_TIMEOUT_MS,
