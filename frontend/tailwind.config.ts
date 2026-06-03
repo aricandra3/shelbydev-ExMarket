@@ -74,7 +74,7 @@ module.exports = {
             fontFamily: {
                 sans: ["var(--font-inter)", "system-ui", "sans-serif"],
                 display: ["var(--font-outfit)", "system-ui", "sans-serif"],
-                mono: ["JetBrains Mono", "monospace"],
+                mono: ["var(--font-mono)", "JetBrains Mono", "monospace"],
             },
             backgroundImage: {
                 "gradient-radial": "radial-gradient(var(--tw-gradient-stops))",
