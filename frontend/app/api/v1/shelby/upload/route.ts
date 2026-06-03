@@ -14,6 +14,7 @@ const SHELBY_COMPLETE_TIMEOUT_MS = 60_000;
 const MAX_ENCRYPTED_PAYLOAD_BYTES = 2_000_000;
 const MIN_SHELBY_PART_SIZE_BYTES = 1_048_576;
 const SHELBY_START_RETRY_DELAYS_MS = [2_000, 4_000, 8_000, 12_000, 16_000];
+const SHELBY_COMPLETE_RETRY_DELAYS_MS = [2_000, 4_000, 8_000, 12_000, 16_000];
 
 type ShelbyUploadBody = {
     account?: unknown;
@@ -81,6 +82,14 @@ function isRecoverableStartError(status: number, body: string) {
     );
 }
 
+function isRecoverableCompleteError(status: number, body: string) {
+    return (
+        status === 429 ||
+        status >= 500 ||
+        /internal server error|temporarily|try again|timeout|rate limit/i.test(body)
+    );
+}
+
 async function startMultipartUpload(
     account: string,
     blobName: string,
@@ -115,6 +124,33 @@ async function startMultipartUpload(
     }
 
     throw new Error("Failed to start Shelby upload after retry.");
+}
+
+async function completeMultipartUpload(uploadId: string) {
+    for (let attempt = 0; attempt <= SHELBY_COMPLETE_RETRY_DELAYS_MS.length; attempt += 1) {
+        const response = await fetchWithTimeout(
+            buildRpcUrl(`/v1/multipart-uploads/${uploadId}/complete`),
+            {
+                method: "POST",
+                headers: getRpcHeaders("application/json"),
+            },
+            SHELBY_COMPLETE_TIMEOUT_MS,
+            "Finalizing Shelby upload"
+        );
+
+        if (response.ok) return { response, errorBody: "" };
+
+        const errorBody = await readErrorBody(response);
+        const shouldRetry =
+            attempt < SHELBY_COMPLETE_RETRY_DELAYS_MS.length &&
+            isRecoverableCompleteError(response.status, errorBody);
+
+        if (!shouldRetry) return { response, errorBody };
+
+        await sleep(SHELBY_COMPLETE_RETRY_DELAYS_MS[attempt]);
+    }
+
+    throw new Error("Failed to finalize Shelby upload after retry.");
 }
 
 function isHex(value: string) {
@@ -238,20 +274,13 @@ export async function POST(req: NextRequest) {
             );
         }
 
-        const completeResponse = await fetchWithTimeout(
-            buildRpcUrl(`/v1/multipart-uploads/${uploadId}/complete`),
-            {
-                method: "POST",
-                headers: getRpcHeaders("application/json"),
-            },
-            SHELBY_COMPLETE_TIMEOUT_MS,
-            "Finalizing Shelby upload"
-        );
+        const { response: completeResponse, errorBody: completeErrorBody } =
+            await completeMultipartUpload(uploadId);
 
         if (!completeResponse.ok) {
             return NextResponse.json(
                 {
-                    error: `Failed to finalize Shelby upload. status: ${completeResponse.status}, body: ${await readErrorBody(completeResponse)}`,
+                    error: `Failed to finalize Shelby upload. uploadId: ${uploadId}, status: ${completeResponse.status}, body: ${completeErrorBody}`,
                 },
                 { status: completeResponse.status, headers: rateLimitHeaders(rateLimit) }
             );
