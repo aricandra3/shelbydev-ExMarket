@@ -24,7 +24,7 @@ type PutBlobProgress = {
     totalBytes: number;
 };
 
-const SHELBY_COMPLETE_TIMEOUT_MS = 120_000;
+const SHELBY_COMPLETE_TIMEOUT_MS = 180_000;
 
 // ─────────────────────────────────────────────────
 // Shelby Client
