@@ -6,9 +6,17 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAppWallet } from "@/components/wallet/walletContext";
-import { waitForTransaction } from "@/lib/aptos";
-import { buildRegisterPromptPayload, buildUpdateBlobIdPayload, getCreatorPrompts } from "@/lib/contracts";
-import { invalidatePromptRegistryCache } from "@/lib/promptRegistry";
+import { invalidateViewCache, waitForTransaction } from "@/lib/aptos";
+import {
+    buildRegisterPromptPayload,
+    buildUpdateBlobIdPayload,
+    getCreatorPrompts,
+    getPromptMetadata,
+} from "@/lib/contracts";
+import {
+    invalidatePromptRegistryCache,
+    rememberPromptInRegistry,
+} from "@/lib/promptRegistry";
 import { aptToOctas, PROMPT_CATEGORIES } from "@/lib/constants";
 import { PRICING_MODEL_REVERSE } from "@/types";
 import type { PricingModel } from "@/types";
@@ -141,7 +149,16 @@ export default function CreatePage() {
         setStatusDetail("Confirming tx 3 on-chain...");
         await waitForTransaction(updateResponse.hash, { checkSuccess: true });
 
-        invalidatePromptRegistryCache();
+        invalidateViewCache("::prompt_registry::");
+        const metadata = await getPromptMetadata(publish.promptId, { fresh: true }).catch(
+            () => null
+        );
+        if (metadata) {
+            rememberPromptInRegistry(metadata);
+        } else {
+            invalidatePromptRegistryCache();
+        }
+
         setTxHash(updateResponse.hash);
         setRecovery(null);
         setStatusDetail("");
