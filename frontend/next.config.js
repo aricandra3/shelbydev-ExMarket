@@ -2,6 +2,7 @@
 const nextConfig = {
     reactStrictMode: true,
     outputFileTracingRoot: __dirname,
+    poweredByHeader: false,
     images: {
         remotePatterns: [
             {
@@ -9,6 +10,9 @@ const nextConfig = {
                 hostname: "**",
             },
         ],
+    },
+    experimental: {
+        optimizePackageImports: ["lucide-react", "zustand"],
     },
     async headers() {
         return [
