@@ -13,6 +13,7 @@ const SHELBY_PART_TIMEOUT_MS = 30_000;
 const SHELBY_COMPLETE_TIMEOUT_MS = 60_000;
 const MAX_ENCRYPTED_PAYLOAD_BYTES = 2_000_000;
 const MIN_SHELBY_PART_SIZE_BYTES = 1_048_576;
+const SHELBY_START_RETRY_DELAYS_MS = [2_000, 4_000, 8_000, 12_000, 16_000];
 
 type ShelbyUploadBody = {
     account?: unknown;
@@ -66,6 +67,54 @@ async function readErrorBody(response: Response) {
     } catch {
         return "Could not read error body";
     }
+}
+
+function sleep(ms: number) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isRecoverableStartError(status: number, body: string) {
+    return (
+        status === 429 ||
+        status >= 500 ||
+        /not been registered|rate limit|temporarily|try again/i.test(body)
+    );
+}
+
+async function startMultipartUpload(
+    account: string,
+    blobName: string,
+    partSize: number
+) {
+    for (let attempt = 0; attempt <= SHELBY_START_RETRY_DELAYS_MS.length; attempt += 1) {
+        const response = await fetchWithTimeout(
+            buildRpcUrl("/v1/multipart-uploads"),
+            {
+                method: "POST",
+                headers: getRpcHeaders("application/json"),
+                body: JSON.stringify({
+                    rawAccount: account,
+                    rawBlobName: blobName,
+                    rawPartSize: partSize,
+                }),
+            },
+            SHELBY_START_TIMEOUT_MS,
+            "Starting Shelby upload"
+        );
+
+        if (response.ok) return { response, errorBody: "" };
+
+        const errorBody = await readErrorBody(response);
+        const shouldRetry =
+            attempt < SHELBY_START_RETRY_DELAYS_MS.length &&
+            isRecoverableStartError(response.status, errorBody);
+
+        if (!shouldRetry) return { response, errorBody };
+
+        await sleep(SHELBY_START_RETRY_DELAYS_MS[attempt]);
+    }
+
+    throw new Error("Failed to start Shelby upload after retry.");
 }
 
 function isHex(value: string) {
@@ -150,28 +199,17 @@ export async function POST(req: NextRequest) {
     );
 
     try {
-        const startResponse = await fetchWithTimeout(
-            buildRpcUrl("/v1/multipart-uploads"),
-            {
-                method: "POST",
-                headers: getRpcHeaders("application/json"),
-                body: JSON.stringify({
-                    rawAccount: account,
-                    rawBlobName: blobName,
-                    rawPartSize: Math.max(
-                        payloadBytes.length,
-                        MIN_SHELBY_PART_SIZE_BYTES
-                    ),
-                }),
-            },
-            SHELBY_START_TIMEOUT_MS,
-            "Starting Shelby upload"
+        const partSize = Math.max(
+            payloadBytes.length,
+            MIN_SHELBY_PART_SIZE_BYTES
         );
+        const { response: startResponse, errorBody: startErrorBody } =
+            await startMultipartUpload(account, blobName, partSize);
 
         if (!startResponse.ok) {
             return NextResponse.json(
                 {
-                    error: `Failed to start Shelby upload. status: ${startResponse.status}, body: ${await readErrorBody(startResponse)}`,
+                    error: `Failed to start Shelby upload. partSize: ${partSize}, status: ${startResponse.status}, body: ${startErrorBody}`,
                 },
                 { status: startResponse.status, headers: rateLimitHeaders(rateLimit) }
             );
