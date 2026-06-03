@@ -2,9 +2,7 @@
 
 import type { Metadata } from "next";
 import { Inter, Outfit } from "next/font/google";
-import { WalletProvider } from "@/components/wallet/WalletProvider";
-import { Navbar } from "@/components/layout/Navbar";
-import { Footer } from "@/components/layout/Footer";
+import { ClientShell } from "@/components/ClientShell";
 import "@/styles/globals.css";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
@@ -70,11 +68,7 @@ export default function RootLayout({
                 />
 
                 <div className="relative z-10 flex flex-col min-h-screen">
-                    <WalletProvider>
-                        <Navbar />
-                        <main className="flex-1">{children}</main>
-                        <Footer />
-                    </WalletProvider>
+                    <ClientShell>{children}</ClientShell>
                 </div>
             </body>
         </html>

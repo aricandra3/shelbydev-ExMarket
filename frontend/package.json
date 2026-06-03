@@ -14,7 +14,6 @@
     "@aptos-labs/wallet-adapter-react": "^8.3.3",
     "@shelby-protocol/sdk": "^0.2.4",
     "clsx": "^2.1.0",
-    "framer-motion": "^12.35.2",
     "lucide-react": "^0.400.0",
     "next": "15.5.18",
     "react": "^18.3.0",
