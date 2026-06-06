@@ -105,7 +105,9 @@ export default function RootLayout({
                 />
 
                 <div className="relative z-10 flex flex-col min-h-screen">
-                    <ClientShell>{children}</ClientShell>
+                    <main>
+                        <ClientShell>{children}</ClientShell>
+                    </main>
                 </div>
             </body>
         </html>

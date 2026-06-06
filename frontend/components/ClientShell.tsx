@@ -31,7 +31,7 @@ export function ClientShell({ children }: { children: ReactNode }) {
     return (
         <WalletProvider>
             <Navbar />
-            <main className="flex-1">{children}</main>
+            <div className="flex-1">{children}</div>
             <Footer />
         </WalletProvider>
     );
