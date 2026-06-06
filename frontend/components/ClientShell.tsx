@@ -9,16 +9,22 @@ import { Footer } from "@/components/layout/Footer";
 
 const WalletProvider = dynamic(
     () =>
-        import("@/components/wallet/WalletProvider").then(
+        import(/* webpackChunkName: "wallet" */ "@/components/wallet/WalletProvider").then(
             (mod) => mod.WalletProvider
         ),
-    { ssr: false }
+    { 
+        ssr: false,
+        loading: () => null  // Prevent flash while loading
+    }
 );
 
 const Navbar = dynamic(
     () =>
-        import("@/components/layout/Navbar").then((mod) => mod.Navbar),
-    { ssr: false }
+        import(/* webpackChunkName: "navbar" */ "@/components/layout/Navbar").then((mod) => mod.Navbar),
+    { 
+        ssr: false,
+        loading: () => null
+    }
 );
 
 export function ClientShell({ children }: { children: ReactNode }) {
