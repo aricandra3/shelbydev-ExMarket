@@ -52,6 +52,9 @@ export const metadata: Metadata = {
         index: true,
         follow: true,
     },
+    icons: {
+        icon: "/favicon.svg",
+    },
 };
 
 export default function RootLayout({
@@ -61,6 +64,11 @@ export default function RootLayout({
 }) {
     return (
         <html lang="en" className={`dark ${inter.variable} ${outfit.variable} ${jetbrains.variable}`}>
+            <head>
+                {/* Preload critical resources */}
+                <link rel="preload" href="/assets/noise.png" as="image" type="image/png" />
+                <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+            </head>
             <body className="relative flex min-h-screen flex-col overflow-x-hidden bg-retro-paper font-sans text-cream antialiased">
                 <div aria-hidden className="fixed inset-0 w-full h-full bg-noise mix-blend-overlay" />
                 <div
