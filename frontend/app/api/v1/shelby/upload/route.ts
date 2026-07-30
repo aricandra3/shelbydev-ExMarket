@@ -13,15 +13,66 @@ const SHELBY_PART_TIMEOUT_MS = 30_000;
 const SHELBY_COMPLETE_TIMEOUT_MS = 60_000;
 const MAX_ENCRYPTED_PAYLOAD_BYTES = 2_000_000;
 const MIN_SHELBY_PART_SIZE_BYTES = 1_048_576;
-const SHELBY_START_RETRY_DELAYS_MS = [2_000, 4_000, 8_000, 12_000, 16_000];
+// Retries here exist for the gap between the register_blob transaction landing
+// and Shelby seeing it. In practice the first attempt succeeds (measured: 1
+// attempt, 1.8s), so this ladder only shapes how fast a genuine failure
+// surfaces — the old 2/4/8/12/16 ladder made a permanently unregistered blob
+// take 47s to report. ~15s total is plenty of slack for indexer lag.
+const SHELBY_START_RETRY_DELAYS_MS = [1_000, 2_000, 4_000, 8_000];
 const SHELBY_COMPLETE_RETRY_DELAYS_MS = [2_000, 4_000, 8_000, 12_000, 16_000];
 
+/// Uploading runs in two phases so the caller can start signing the publish
+/// transaction while Shelby is still finalizing:
+///
+///   phase "start"    → begin the multipart upload and PUT the payload. Fast
+///                      (~2.3s measured), and it is what actually transfers the
+///                      bytes. Returns the uploadId.
+///   phase "complete" → ask Shelby to finalize. This is the slow one (~10.6s
+///                      measured for an 869-byte payload) and is server-side
+///                      Shelby work — erasure coding and slice distribution —
+///                      that no client-side tuning affects.
+type UploadPhase = "start" | "complete";
+
 type ShelbyUploadBody = {
+    phase?: unknown;
     account?: unknown;
     blobName?: unknown;
     ciphertextHex?: unknown;
     domainHex?: unknown;
+    uploadId?: unknown;
 };
+
+/// uploadId → the blob it belongs to, so a "complete" call can only finalize an
+/// upload this server actually started.
+///
+/// In-memory, which means it does not survive a cold start or span serverless
+/// instances. That is acceptable here because it is defense-in-depth, not the
+/// primary control: Shelby authorizes the finalize with our API key, and a
+/// caller who guessed an id could only finalize an upload that was going to be
+/// finalized anyway. A durable store (Redis/KV) is the fix if this ever needs
+/// to be authoritative — the same caveat applies to the rate limiter.
+const pendingUploads = new Map<
+    string,
+    { account: string; blobName: string; expiresAt: number }
+>();
+
+const PENDING_UPLOAD_TTL_MS = 10 * 60 * 1000;
+
+function rememberPendingUpload(uploadId: string, account: string, blobName: string) {
+    const now = Date.now();
+
+    if (pendingUploads.size > 500) {
+        Array.from(pendingUploads.entries()).forEach(([id, entry]) => {
+            if (entry.expiresAt <= now) pendingUploads.delete(id);
+        });
+    }
+
+    pendingUploads.set(uploadId, {
+        account,
+        blobName,
+        expiresAt: now + PENDING_UPLOAD_TTL_MS,
+    });
+}
 
 function buildRpcUrl(path: string) {
     const normalizedBase = SHELBY_RPC_URL.endsWith("/")
@@ -100,14 +151,91 @@ type UploadTimings = {
     completeAttempts: number;
 };
 
-function logUploadTimings(t: UploadTimings, payloadBytes: number, partSize: number) {
-    const total = t.startMs + t.partMs + t.completeMs;
+function logStartTimings(t: UploadTimings, payloadBytes: number, partSize: number) {
     console.info(
-        `Shelby upload: total ${total}ms ` +
-            `(start ${t.startMs}ms/${t.startAttempts} attempt(s), ` +
-            `part ${t.partMs}ms, complete ${t.completeMs}ms/${t.completeAttempts} attempt(s)) ` +
+        `Shelby upload start: ${t.startMs + t.partMs}ms ` +
+            `(start ${t.startMs}ms/${t.startAttempts} attempt(s), part ${t.partMs}ms) ` +
             `payload=${payloadBytes}B declaredPartSize=${partSize}B`
     );
+}
+
+function logCompleteTimings(t: UploadTimings, uploadId: string, ok: boolean) {
+    console.info(
+        `Shelby upload complete: ${t.completeMs}ms/${t.completeAttempts} attempt(s) ` +
+            `uploadId=${uploadId} ok=${ok}`
+    );
+}
+
+/// Finalize an upload started by a previous "start" call.
+async function handleComplete(
+    body: ShelbyUploadBody,
+    rateLimit: Parameters<typeof rateLimitHeaders>[0]
+) {
+    if (
+        typeof body.uploadId !== "string" ||
+        !/^[A-Za-z0-9_.:-]{8,128}$/.test(body.uploadId)
+    ) {
+        return NextResponse.json(
+            { error: "Invalid Shelby upload id." },
+            { status: 400, headers: rateLimitHeaders(rateLimit) }
+        );
+    }
+
+    const uploadId = body.uploadId;
+    const pending = pendingUploads.get(uploadId);
+
+    // Missing entries are tolerated (cold start / another instance), but a
+    // mismatch against a known entry is a hard no.
+    if (
+        pending &&
+        (pending.account !== body.account || pending.blobName !== body.blobName)
+    ) {
+        return NextResponse.json(
+            { error: "Shelby upload id does not match this blob." },
+            { status: 403, headers: rateLimitHeaders(rateLimit) }
+        );
+    }
+
+    const timings: UploadTimings = {
+        startMs: 0,
+        startAttempts: 0,
+        partMs: 0,
+        completeMs: 0,
+        completeAttempts: 0,
+    };
+
+    try {
+        const completeStartedAt = Date.now();
+        const { response, errorBody } = await completeMultipartUpload(
+            uploadId,
+            timings
+        );
+        timings.completeMs = Date.now() - completeStartedAt;
+        logCompleteTimings(timings, uploadId, response.ok);
+
+        if (!response.ok) {
+            return NextResponse.json(
+                {
+                    error: `Failed to finalize Shelby upload. uploadId: ${uploadId}, status: ${response.status}, body: ${errorBody}`,
+                },
+                { status: response.status, headers: rateLimitHeaders(rateLimit) }
+            );
+        }
+
+        pendingUploads.delete(uploadId);
+
+        return NextResponse.json(
+            { ok: true, completeMs: timings.completeMs },
+            { headers: rateLimitHeaders(rateLimit) }
+        );
+    } catch (error: unknown) {
+        const message =
+            error instanceof Error ? error.message : "Shelby finalize failed.";
+        return NextResponse.json(
+            { error: message },
+            { status: 502, headers: rateLimitHeaders(rateLimit) }
+        );
+    }
 }
 
 async function startMultipartUpload(
@@ -240,6 +368,12 @@ export async function POST(req: NextRequest) {
         );
     }
 
+    const phase: UploadPhase = body.phase === "complete" ? "complete" : "start";
+
+    if (phase === "complete") {
+        return handleComplete(body, rateLimit);
+    }
+
     const validationError = validateUploadBody(body);
     if (validationError) {
         return NextResponse.json(
@@ -309,23 +443,13 @@ export async function POST(req: NextRequest) {
             );
         }
 
-        const completeStartedAt = Date.now();
-        const { response: completeResponse, errorBody: completeErrorBody } =
-            await completeMultipartUpload(uploadId, timings);
-        timings.completeMs = Date.now() - completeStartedAt;
-        logUploadTimings(timings, payloadBytes.length, partSize);
-
-        if (!completeResponse.ok) {
-            return NextResponse.json(
-                {
-                    error: `Failed to finalize Shelby upload. uploadId: ${uploadId}, status: ${completeResponse.status}, body: ${completeErrorBody}`,
-                },
-                { status: completeResponse.status, headers: rateLimitHeaders(rateLimit) }
-            );
-        }
+        // Bytes are transferred. Hand the uploadId back so the caller can
+        // finalize separately and overlap that wait with its own work.
+        rememberPendingUpload(uploadId, account, blobName);
+        logStartTimings(timings, payloadBytes.length, partSize);
 
         return NextResponse.json(
-            { ok: true },
+            { uploadId, startMs: timings.startMs, partMs: timings.partMs },
             { headers: rateLimitHeaders(rateLimit) }
         );
     } catch (error: unknown) {

@@ -7,7 +7,11 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAppWallet } from "@/components/wallet/walletContext";
 import { invalidateViewCache, waitForTransaction } from "@/lib/aptos";
-import { buildPublishPromptPayload, getPromptMetadata } from "@/lib/contracts";
+import {
+    buildDeactivatePromptPayload,
+    buildPublishPromptPayload,
+    getPromptMetadata,
+} from "@/lib/contracts";
 import {
     invalidatePromptRegistryCache,
     rememberPromptInRegistry,
@@ -163,39 +167,40 @@ export default function CreatePage() {
         setStep("uploading-blob");
         setStatusDetail("Uploading encrypted content to Shelby RPC...");
 
+        // Transfer the bytes first (~2.3s). Finalizing is the slow part, and it
+        // is deliberately NOT awaited here: nothing in the publish transaction
+        // depends on it, so it runs while the wallet dialog is open.
+        //
+        // Settled into a value rather than left to reject unobserved.
+        type Finalizing = Promise<{ ok: true } | { ok: false; err: unknown }>;
+        let finalizing: Finalizing;
+
         try {
-            await shelbyService.putEncryptedBlob(
+            const { uploadId } = await shelbyService.startEncryptedBlobUpload(
                 publish.ciphertextHex,
                 publish.domainHex,
                 publish.accountAddress,
-                publish.blobName,
-                (progress) => {
-                    if (progress.phase === "finalizing") {
-                        setStep("finalizing-blob");
-                        setStatusDetail(
-                            "Finalizing Shelby multipart upload. If Shelby RPC is slow, this is the step that used to hang."
-                        );
-                        return;
-                    }
-
-                    if (progress.phase === "complete") {
-                        setStatusDetail("Shelby upload complete. Preparing final on-chain link...");
-                        return;
-                    }
-
-                    setStep("uploading-blob");
-                    setStatusDetail("Uploading encrypted content to Shelby RPC...");
-                }
+                publish.blobName
             );
+
+            finalizing = shelbyService
+                .finalizeUpload(uploadId, publish.accountAddress, publish.blobName)
+                .then(() => ({ ok: true as const }))
+                .catch((err: unknown) => ({ ok: false as const, err }));
         } catch (err: unknown) {
+            // On a retry the blob may already be stored from the previous
+            // attempt; that is a success, not a failure.
             const message = getErrorMessage(err, "");
-            if (!/(already|exists|duplicate|409)/i.test(message)) throw err;
-            setStatusDetail("Shelby blob is already uploaded. Continuing to final on-chain link...");
+            if (!/(already|exists|duplicate|409|written)/i.test(message)) throw err;
+            setStatusDetail("Shelby blob is already stored. Continuing to publish...");
+            finalizing = Promise.resolve({ ok: true as const });
         }
 
         const blobId = `${publish.accountAddress}/${publish.blobName}`;
         setStep("publishing");
-        setStatusDetail("Waiting for wallet signature for tx 2: publish the listing...");
+        setStatusDetail(
+            "Waiting for wallet signature for tx 2: publish the listing. Shelby is finalizing storage in the background."
+        );
 
         const publishPayload = buildPublishPromptPayload({
             seed: publish.seed,
@@ -213,6 +218,39 @@ export default function CreatePage() {
 
         setStatusDetail("Confirming tx 2 on-chain...");
         await waitForTransaction(updateResponse.hash, { checkSuccess: true });
+
+        // The listing is live now, so storage has to be confirmed before we call
+        // this a success. Whatever is left of Shelby's ~10s finalize is what the
+        // creator waits for here — usually little or nothing.
+        setStep("finalizing-blob");
+        setStatusDetail("Confirming Shelby finished storing the content...");
+
+        const finalized = await finalizing;
+        if (!finalized.ok) {
+            // Published, but the content is not confirmed stored. Take the
+            // listing off the market rather than leave a prompt that buyers
+            // could pay for and fail to decrypt.
+            setStatusDetail("Shelby storage failed. Deactivating the listing...");
+
+            try {
+                const deactivateResponse = await signAndSubmitTransaction({
+                    data: buildDeactivatePromptPayload(publish.promptId),
+                });
+                await waitForTransaction(deactivateResponse.hash, {
+                    checkSuccess: true,
+                });
+                invalidateViewCache("::prompt_registry::");
+                invalidatePromptRegistryCache();
+            } catch {
+                // Fall through — the message below tells the creator what to do.
+            }
+
+            throw new Error(
+                `${getErrorMessage(finalized.err, "Shelby could not finalize the upload.")} ` +
+                    "The listing was published and then deactivated, so nobody can buy content that is not stored. " +
+                    "Retry to re-upload and reactivate it from your dashboard."
+            );
+        }
 
         invalidateViewCache("::prompt_registry::");
         const metadata = await getPromptMetadata(publish.promptId, { fresh: true }).catch(

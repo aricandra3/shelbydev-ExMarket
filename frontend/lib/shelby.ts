@@ -18,12 +18,6 @@ import {
 
 import { NETWORK } from "./constants";
 
-type PutBlobProgress = {
-    phase: "starting" | "uploading" | "finalizing" | "complete";
-    uploadedBytes: number;
-    totalBytes: number;
-};
-
 const SHELBY_COMPLETE_TIMEOUT_MS = 180_000;
 
 // ─────────────────────────────────────────────────
@@ -92,62 +86,7 @@ async function readErrorBody(response: Response) {
     }
 }
 
-async function uploadEncryptedBlobWithServerKey(
-    address: string,
-    blobName: string,
-    ciphertextHex: string,
-    domainHex: string,
-    onProgress?: (progress: PutBlobProgress) => void
-) {
-    const totalBytes = new TextEncoder().encode(
-        JSON.stringify({ ciphertextHex, domainHex })
-    ).length;
-
-    onProgress?.({
-        phase: "starting",
-        uploadedBytes: 0,
-        totalBytes,
-    });
-
-    onProgress?.({
-        phase: "uploading",
-        uploadedBytes: 0,
-        totalBytes,
-    });
-
-    onProgress?.({
-        phase: "finalizing",
-        uploadedBytes: totalBytes,
-        totalBytes,
-    });
-
-    const response = await fetchWithTimeout(
-        {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                account: address,
-                blobName,
-                ciphertextHex,
-                domainHex,
-            }),
-        },
-        SHELBY_COMPLETE_TIMEOUT_MS,
-        "Uploading encrypted content to Shelby"
-    );
-
-    if (!response.ok) {
-        throw new Error(
-            `Shelby upload failed. status: ${response.status}, body: ${await readErrorBody(response)}`
-        );
-    }
-
-    onProgress?.({
-        phase: "complete",
-        uploadedBytes: totalBytes,
-        totalBytes,
-    });
-}
+const SHELBY_START_TIMEOUT_MS = 60_000;
 
 // ─────────────────────────────────────────────────
 // Shelby Service
@@ -189,28 +128,82 @@ export const shelbyService = {
         }
     },
     /**
-     * Upload an ACE-encrypted prompt blob to Shelby.
+     * Transfer an ACE-encrypted prompt blob to Shelby, without finalizing it.
      * Stores a JSON payload: { ciphertextHex, domainHex }
      *
      * - ciphertextHex: hex-serialized ACE Ciphertext
      * - domainHex:     hex-serialized ACE FullDecryptionDomain (contractId + domain)
      *
-     * Call aceEncrypt() first to produce these values.
+     * Call aceEncrypt() first to produce these values, then finalizeUpload()
+     * with the returned uploadId. The split exists because finalizing takes
+     * ~10s of Shelby-side work, and the caller can spend that time collecting
+     * the publish signature instead of watching a spinner.
      */
-    async putEncryptedBlob(
+    async startEncryptedBlobUpload(
         ciphertextHex: string,
         domainHex: string,
         address: string,
-        blobName: string,
-        onProgress?: (progress: PutBlobProgress) => void
-    ): Promise<void> {
-        await uploadEncryptedBlobWithServerKey(
-            address,
-            blobName,
-            ciphertextHex,
-            domainHex,
-            onProgress
+        blobName: string
+    ): Promise<{ uploadId: string }> {
+        const response = await fetchWithTimeout(
+            {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    phase: "start",
+                    account: address,
+                    blobName,
+                    ciphertextHex,
+                    domainHex,
+                }),
+            },
+            SHELBY_START_TIMEOUT_MS,
+            "Uploading encrypted content to Shelby"
         );
+
+        if (!response.ok) {
+            throw new Error(
+                `Shelby upload failed. status: ${response.status}, body: ${await readErrorBody(response)}`
+            );
+        }
+
+        const { uploadId } = (await response.json()) as { uploadId?: string };
+        if (!uploadId) {
+            throw new Error("Shelby upload did not return an upload id.");
+        }
+
+        return { uploadId };
+    },
+
+    /**
+     * Finalize a transferred blob. This is the slow phase — Shelby erasure-codes
+     * the payload and distributes it to storage providers.
+     */
+    async finalizeUpload(
+        uploadId: string,
+        address: string,
+        blobName: string
+    ): Promise<void> {
+        const response = await fetchWithTimeout(
+            {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    phase: "complete",
+                    uploadId,
+                    account: address,
+                    blobName,
+                }),
+            },
+            SHELBY_COMPLETE_TIMEOUT_MS,
+            "Finalizing Shelby upload"
+        );
+
+        if (!response.ok) {
+            throw new Error(
+                `Shelby finalize failed. status: ${response.status}, body: ${await readErrorBody(response)}`
+            );
+        }
     },
 
     /**
