@@ -8,7 +8,8 @@
 /// It also keeps the browser Shelby SDK out of server bundles: `rpc.getBlob` is
 /// a plain GET, so there is nothing to import here.
 
-import { SHELBY_RPC_URL } from "./constants";
+import { SHELBY_CONTRACT_ADDRESS, SHELBY_RPC_URL } from "./constants";
+import { viewFunctionServer } from "./aptosServer";
 
 const SHELBY_API_KEY = process.env.SHELBY_API_KEY || "";
 const SHELBY_READ_TIMEOUT_MS = 30_000;
@@ -97,6 +98,56 @@ export async function fetchShelbyBlob(blobId: string): Promise<ShelbyBlobResult>
     } finally {
         clearTimeout(timeout);
     }
+}
+
+export type ShelbyBlobStatus = {
+    blobId: string;
+    /// Absolute expiry, microseconds since epoch. Storage is paid up to here.
+    expirationMicros: number;
+    expiresAt: string;
+    daysRemaining: number;
+    sizeBytes: number;
+    /// False while Shelby has the registration but not the payload.
+    isWritten: boolean;
+};
+
+/// Shelby keys blob metadata by "@<64-char-owner-without-0x>/<blobName>".
+function blobMetadataKey(account: string, blobName: string) {
+    const normalized = account.replace(/^0x/, "").toLowerCase().padStart(64, "0");
+    return `@${normalized}/${blobName}`;
+}
+
+/// Storage lifetime for a blob, straight from Shelby's own on-chain metadata.
+///
+/// This matters because a prompt sells perpetual access while its storage is
+/// only paid until `expirationMicros`. Creators need to see that date, and
+/// extend it before it passes.
+export async function getBlobStatusServer(
+    blobId: string
+): Promise<ShelbyBlobStatus | null> {
+    const { account, blobName } = parseBlobId(blobId);
+
+    const result = await viewFunctionServer<any[]>(
+        `${SHELBY_CONTRACT_ADDRESS}::blob_metadata::get_blob_metadata`,
+        [blobMetadataKey(account, blobName)],
+        [],
+        { cache: false }
+    );
+
+    const metadata = result?.[0]?.vec?.[0];
+    if (!metadata) return null;
+
+    const expirationMicros = Number(metadata.expiration_micros ?? 0);
+    const expiresAtMs = expirationMicros / 1000;
+
+    return {
+        blobId,
+        expirationMicros,
+        expiresAt: new Date(expiresAtMs).toISOString(),
+        daysRemaining: Math.floor((expiresAtMs - Date.now()) / 86_400_000),
+        sizeBytes: Number(metadata.blob_size ?? 0),
+        isWritten: Boolean(metadata.is_written),
+    };
 }
 
 /// Read a blob and parse the ACE envelope stored by the create flow.

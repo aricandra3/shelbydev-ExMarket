@@ -29,11 +29,23 @@ export const SHELBY_RPC_URL =
         : "https://api.testnet.shelby.xyz/shelby");
 
 // ── Shelby Protocol Contract Address ────────────
+//
+// Deliberately not configurable. The Shelby SDK hardcodes the deployer it
+// registers blobs against (`SHELBY_DEPLOYER`), and `createRegisterBlobPayload`
+// uses it unless a deployer is passed explicitly — which we do not do. An env
+// var here would therefore describe a different contract than the one our blobs
+// actually live in.
+//
+// That drift already happened: this used to read 0xc63d6a5e… for testnet from
+// NEXT_PUBLIC_SHELBY_CONTRACT_ADDRESS, while every blob was registered at
+// 0x85fdb9a1… (verified with get_blob_metadata — the old address returns an
+// empty Option for blobs that exist).
+//
+// Kept as a literal rather than re-exported from the SDK because this module is
+// imported by server code, and the SDK entry points are environment-specific.
+// lib/shelby.ts asserts it still matches SHELBY_DEPLOYER at runtime.
 export const SHELBY_CONTRACT_ADDRESS =
-    process.env.NEXT_PUBLIC_SHELBY_CONTRACT_ADDRESS ||
-    (NETWORK === "shelbynet"
-        ? "0x85fdb9a176ab8ef1d9d9c1b60d60b3924f0800ac1de1cc2085fb0b8bb4988e6a"
-        : "0xc63d6a5efb0080a6029403131715bd4971e1149f7cc099aac69bb0069b3ddbf5");
+    "0x85fdb9a176ab8ef1d9d9c1b60d60b3924f0800ac1de1cc2085fb0b8bb4988e6a";
 
 // ── ExMarket Smart Contract ─────────────────────
 export const MODULE_ADDRESS =

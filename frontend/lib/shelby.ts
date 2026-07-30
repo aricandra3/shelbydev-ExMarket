@@ -14,12 +14,27 @@
 
 import {
     ShelbyBlobClient,
+    SHELBY_DEPLOYER,
     generateCommitments,
     ClayErasureCodingProvider,
     createDefaultErasureCodingProvider,
     defaultErasureCodingConfig,
     expectedTotalChunksets,
 } from "@shelby-protocol/sdk/browser";
+
+import { SHELBY_CONTRACT_ADDRESS } from "./constants";
+
+// The SDK decides where blobs are registered; our constant only mirrors it so
+// server code can read blob metadata without importing a browser bundle. If a
+// SDK upgrade moves the deployer, that mirror is silently wrong — and blobs
+// would look like they do not exist. Fail loudly instead.
+if (SHELBY_DEPLOYER.toString().toLowerCase() !== SHELBY_CONTRACT_ADDRESS.toLowerCase()) {
+    console.error(
+        `Shelby deployer mismatch: SDK registers blobs at ${SHELBY_DEPLOYER}, ` +
+            `but SHELBY_CONTRACT_ADDRESS is ${SHELBY_CONTRACT_ADDRESS}. ` +
+            "Update lib/constants.ts — blob metadata reads will return nothing until you do."
+    );
+}
 
 const SHELBY_COMPLETE_TIMEOUT_MS = 180_000;
 

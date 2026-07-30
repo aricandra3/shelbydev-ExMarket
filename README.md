@@ -45,6 +45,25 @@ Run the test suite:
 cd contracts && aptos move test --named-addresses exmarket=default
 ```
 
+## Storage lifetime
+
+Shelby storage is paid up to a fixed expiry (one year at publish time), while a
+listing sells perpetual access. Nothing in the protocol reconciles those two, so
+the app does:
+
+- `GET /api/v1/shelby/status?promptIds=…` reads each listing's real expiry from
+  Shelby's own `blob_metadata::get_blob_metadata`, and the creator dashboard
+  shows the remaining days per listing.
+- Anything inside 30 days is flagged at the top of the dashboard.
+- **Extend 1 year** signs `blob_metadata::increase_expiration_time`, paid in
+  ShelbyUSD. Its `u64` is an *absolute* expiry in microseconds — confirmed by
+  simulating both readings against the live contract, where a delta aborts — so
+  the app extends from the current expiry rather than from today, and no paid
+  time is thrown away.
+
+Storage extension needs no re-upload and no contract change: the blob keeps its
+identity, so buyers keep reading exactly the content they paid for.
+
 ## Programmatic access (`GET /api/v1/prompt/:id`)
 
 Paid access for agents and backends. Every call proves wallet ownership; no
@@ -139,7 +158,7 @@ See [`frontend/.env.example`](frontend/.env.example) for the full list. Key vari
 | `NEXT_PUBLIC_MODULE_ADDRESS` | Deployed ExMarket contract address |
 | `APTOS_API_KEY` | Server-side Aptos/Shelby API key |
 | `APTOS_API_ORIGIN` | Origin allowed by your Aptos API key |
-| `SHELBY_API_KEY` | Server-side Shelby API key |
+| `SHELBY_API_KEY` | Server-side Shelby API key. Also what egress is billed against — reads go through `/api/v1/shelby/blob`, never straight from the browser. |
 
 ### Network Presets
 
@@ -149,7 +168,6 @@ NEXT_PUBLIC_NETWORK=testnet
 NEXT_PUBLIC_APTOS_NODE_URL=https://api.testnet.aptoslabs.com/v1
 NEXT_PUBLIC_APTOS_INDEXER_URL=https://api.testnet.aptoslabs.com/v1/graphql
 NEXT_PUBLIC_SHELBY_RPC_URL=https://api.testnet.shelby.xyz/shelby
-NEXT_PUBLIC_SHELBY_CONTRACT_ADDRESS=0xc63d6a5efb0080a6029403131715bd4971e1149f7cc099aac69bb0069b3ddbf5
 ```
 
 **shelbynet** *(dev prototype, wiped weekly)*:
@@ -158,7 +176,6 @@ NEXT_PUBLIC_NETWORK=shelbynet
 NEXT_PUBLIC_APTOS_NODE_URL=https://api.shelbynet.shelby.xyz/v1
 NEXT_PUBLIC_APTOS_INDEXER_URL=https://api.shelbynet.shelby.xyz/v1/graphql
 NEXT_PUBLIC_SHELBY_RPC_URL=https://api.shelbynet.shelby.xyz/shelby
-NEXT_PUBLIC_SHELBY_CONTRACT_ADDRESS=0x85fdb9a176ab8ef1d9d9c1b60d60b3924f0800ac1de1cc2085fb0b8bb4988e6a
 ```
 
 ## Tech Stack

@@ -1,7 +1,7 @@
 /// Smart contract interaction helpers
 
 import { viewFunction, buildEntryPayload } from "./aptos";
-import { MODULES } from "./constants";
+import { MODULES, SHELBY_CONTRACT_ADDRESS } from "./constants";
 import {
     findPromptInRegistry,
     getCreatorPromptIdsFromRegistry,
@@ -282,6 +282,24 @@ export function buildLinkBlobPayload(
         blobId,
         Array.from(contentHash),
     ]);
+}
+
+/// Extend a blob's paid storage window on Shelby.
+///
+/// `newExpirationMicros` is an ABSOLUTE timestamp in microseconds, not a delta —
+/// verified by simulating both readings against the live contract: an absolute
+/// value executed, a delta aborted. Pass the current expiry plus the extension
+/// so remaining paid time is not thrown away.
+///
+/// Signed by the blob owner (the creator) and paid in ShelbyUSD.
+export function buildExtendBlobStoragePayload(
+    blobName: string,
+    newExpirationMicros: number
+) {
+    return buildEntryPayload(
+        `${SHELBY_CONTRACT_ADDRESS}::blob_metadata::increase_expiration_time`,
+        [blobName, newExpirationMicros]
+    );
 }
 
 export function buildDeactivatePromptPayload(promptId: string) {
