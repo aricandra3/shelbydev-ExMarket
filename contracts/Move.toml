@@ -4,7 +4,7 @@ version = "1.0.0"
 authors = ["ExMarket Team"]
 
 [addresses]
-exmarket = "0x743d4d9ce1bacb43a9d4caaf65e4ddfaf3fef2645da1e83d0ce26ef2fb1266fe"
+exmarket = "0x1af19f412568bd69930ea371a182493585cc9ad1dd7a0d77919bb8ec4f393d9c"
 
 [dependencies.AptosFramework]
 git = "https://github.com/aptos-labs/aptos-core.git"

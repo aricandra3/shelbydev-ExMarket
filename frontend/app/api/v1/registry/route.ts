@@ -18,10 +18,11 @@ export const dynamic = "force-dynamic";
 const CACHE_TTL_MS = 60_000;
 const TRANSACTION_SCAN_LIMIT = 200;
 const TRANSACTION_FETCH_CONCURRENCY = 4;
-// Each published prompt costs two indexer rows (register_prompt + link_blob),
-// so keep enough headroom to surface a meaningful number of listings.
-const INDEXER_PAGE_SIZE = 25;
-const INDEXER_MAX_PAGES = 4;
+// account_transactions is indexed by account and answers in ~0.4s, so scan a
+// wide window: it also contains publish/initialize/unrelated txs, and only the
+// ones carrying a PromptRegistered event become listings.
+const INDEXER_PAGE_SIZE = 100;
+const INDEXER_MAX_PAGES = 3;
 const METADATA_ENRICH_LIMIT = 80;
 const METADATA_ENRICH_CONCURRENCY = 2;
 const RATE_LIMIT_STATUS = 429;
@@ -38,13 +39,13 @@ type AptosTransaction = {
     events?: AptosEvent[];
 };
 
-type IndexerUserTransaction = {
-    version: number | string;
+type IndexerAccountTransaction = {
+    transaction_version: number | string;
 };
 
-type IndexerUserTransactionsResponse = {
+type IndexerAccountTransactionsResponse = {
     data?: {
-        user_transactions?: IndexerUserTransaction[];
+        account_transactions?: IndexerAccountTransaction[];
     };
     errors?: Array<{ message?: string }>;
 };
@@ -95,21 +96,33 @@ async function fetchWithRetry(url: string, init: RequestInit, retries = 2) {
     throw new Error("Failed to fetch after retry");
 }
 
-async function fetchIndexerRegisterPage(
+async function fetchModuleTransactionVersionsPage(
     offset: number
 ): Promise<Array<number | string>> {
-    // A published prompt spans two transactions: register_prompt creates the
-    // listing, link_blob attaches the Shelby blob and makes it purchasable.
-    // Both are needed to reconstruct a complete listing from events alone.
+    // Discovery reads `account_transactions` for the module address, which is
+    // indexed by account and answers in well under a second.
+    //
+    // Filtering `user_transactions` by `entry_function_id_str` — the obvious
+    // query — is not indexed and times out against the public testnet indexer
+    // (measured: 10s+ → HTTP 408 for every page size). The indexer also no
+    // longer exposes an `events` table at all.
+    //
+    // Every `register_prompt` bumps `Registry.prompt_count` at @exmarket, so
+    // the module address appears in that transaction's write set no matter who
+    // the creator is — verified with a registration from a non-deployer wallet.
+    // `link_blob` / `unlock_prompt` / `update_price` touch only the prompt
+    // object and the creator's account, so they will NOT show up here. That is
+    // fine: transactions are used to discover prompt ids, and current state
+    // comes from `get_prompt_metadata` in enrichPromptMetadata below.
     const query = `
-        query PromptRegistrations($entryFunctions: [String!], $limit: Int!, $offset: Int!) {
-            user_transactions(
-                where: { entry_function_id_str: { _in: $entryFunctions } }
-                order_by: { version: desc }
+        query PromptRegistryTransactions($address: String!, $limit: Int!, $offset: Int!) {
+            account_transactions(
+                where: { account_address: { _eq: $address } }
+                order_by: { transaction_version: desc }
                 limit: $limit
                 offset: $offset
             ) {
-                version
+                transaction_version
             }
         }
     `;
@@ -121,10 +134,7 @@ async function fetchIndexerRegisterPage(
         body: JSON.stringify({
             query,
             variables: {
-                entryFunctions: [
-                    `${MODULES.PROMPT_REGISTRY}::register_prompt`,
-                    `${MODULES.PROMPT_REGISTRY}::link_blob`,
-                ],
+                address: MODULE_ADDRESS,
                 limit: INDEXER_PAGE_SIZE,
                 offset,
             },
@@ -135,7 +145,7 @@ async function fetchIndexerRegisterPage(
         throw new Error(`Aptos indexer HTTP ${response.status}: ${response.statusText}`);
     }
 
-    const payload = (await response.json()) as IndexerUserTransactionsResponse;
+    const payload = (await response.json()) as IndexerAccountTransactionsResponse;
     if (payload.errors?.length) {
         throw new Error(
             payload.errors.map((error) => error.message).filter(Boolean).join("; ") ||
@@ -143,17 +153,19 @@ async function fetchIndexerRegisterPage(
         );
     }
 
-    return (payload.data?.user_transactions ?? []).map((tx) => tx.version);
+    return (payload.data?.account_transactions ?? []).map(
+        (tx) => tx.transaction_version
+    );
 }
 
-async function fetchIndexerRegisterVersions(): Promise<Array<number | string>> {
+async function fetchModuleTransactionVersions(): Promise<Array<number | string>> {
     const versions: Array<number | string> = [];
 
     for (let page = 0; page < INDEXER_MAX_PAGES; page += 1) {
         const offset = page * INDEXER_PAGE_SIZE;
 
         try {
-            const pageVersions = await fetchIndexerRegisterPage(offset);
+            const pageVersions = await fetchModuleTransactionVersionsPage(offset);
             versions.push(...pageVersions);
             if (pageVersions.length < INDEXER_PAGE_SIZE) break;
         } catch (error) {
@@ -294,7 +306,7 @@ async function fetchModuleAccountTransactions(): Promise<AptosTransaction[]> {
 
 async function fetchRegistryTransactions(): Promise<AptosTransaction[]> {
     try {
-        const versions = await fetchIndexerRegisterVersions();
+        const versions = await fetchModuleTransactionVersions();
         if (versions.length === 0) return fetchModuleAccountTransactions();
 
         const indexerTransactions = await mapWithConcurrency(
@@ -400,6 +412,10 @@ async function loadPrompts(force = false): Promise<PromptMetadata[]> {
             });
         });
 
+        // Events give us the set of listings that exist. Their *current* state
+        // (linked, price, active, unlock counts) can only come from the view
+        // function, because link_blob / update_price / deactivate_prompt never
+        // touch @exmarket and so never appear in the scanned transactions.
         const basePrompts = Array.from(registered.values())
             .filter((prompt) => !deactivated.has(prompt.promptId))
             .map((prompt) => {
@@ -413,11 +429,29 @@ async function loadPrompts(force = false): Promise<PromptMetadata[]> {
                     blobLinked: Boolean(linked),
                     status: linked ? ("active" as const) : ("inactive" as const),
                 };
-            })
-            // Nothing to sell until the Shelby blob is attached — keep
-            // half-published listings out of the marketplace.
-            .filter((prompt) => prompt.blobLinked);
-        const prompts = await enrichRecentPrompts(basePrompts, !force);
+            });
+
+        const enriched = await enrichRecentPrompts(basePrompts, !force);
+
+        // Only list what can actually be bought. `status` here already folds in
+        // both halves of the on-chain is_prompt_active check (creator-active AND
+        // blob linked), which matters because a later deactivate_prompt never
+        // shows up in the scanned transactions either.
+        const prompts = enriched.filter(
+            (prompt) => prompt.status === "active" && prompt.blobLinked
+        );
+
+        const hiddenCount = enriched.length - prompts.length;
+        if (hiddenCount > 0) {
+            console.info(
+                `Registry: hiding ${hiddenCount} of ${enriched.length} listing(s) that are not purchasable (no Shelby blob linked, or deactivated).`
+            );
+        }
+        if (basePrompts.length > METADATA_ENRICH_LIMIT) {
+            console.warn(
+                `Registry: ${basePrompts.length} listings discovered but only the newest ${METADATA_ENRICH_LIMIT} were enriched; older listings are omitted.`
+            );
+        }
 
         cache = { prompts, timestamp: Date.now() };
         return prompts;
