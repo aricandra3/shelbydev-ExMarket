@@ -482,6 +482,129 @@ module exmarket::payment_tests {
         payment::unlock_prompt(buyer, prompt_id); // E_PROMPT_NOT_ACTIVE
     }
 
+    // ── Single-transaction publishing ───────────────
+
+    // publish_prompt lands at the address the client derived from (creator,
+    // seed), so ACE can encrypt against the prompt id before any signing.
+    #[test(framework = @aptos_framework, exmarket = @exmarket, creator = @0xC)]
+    fun test_publish_prompt_lands_on_derived_address(
+        framework: &signer,
+        exmarket: &signer,
+        creator: &signer,
+    ) {
+        setup(framework, exmarket, creator);
+        let creator_addr = signer::address_of(creator);
+        let seed = b"exmarket/prompt/abc123";
+
+        let expected = prompt_registry::derive_prompt_id(creator_addr, seed);
+
+        prompt_registry::publish_prompt(
+            creator,
+            seed,
+            string::utf8(b"One-shot prompt"),
+            string::utf8(b"Published in a single transaction"),
+            string::utf8(b"Claude"),
+            tags(),
+            prompt_registry::pricing_pay_per_unlock(),
+            PRICE,
+            0,
+            string::utf8(b"0xcreator/one_shot.txt"),
+            content_hash(),
+        );
+
+        let prompts = prompt_registry::get_creator_prompts(creator_addr);
+        assert!(vector::length(&prompts) == 1, 1);
+        assert!(*vector::borrow(&prompts, 0) == expected, 2);
+
+        // Born complete: linked, hashed, and immediately sellable
+        assert!(prompt_registry::is_blob_linked(expected), 3);
+        assert!(prompt_registry::is_prompt_active(expected), 4);
+        assert!(vector::length(&prompt_registry::get_content_hash(expected)) == 32, 5);
+    }
+
+    // A listing published this way is buyable straight away — no second
+    // transaction to link content, and no unsellable in-between state.
+    #[test(framework = @aptos_framework, exmarket = @exmarket, creator = @0xC, buyer = @0xB)]
+    fun test_published_prompt_is_immediately_buyable(
+        framework: &signer,
+        exmarket: &signer,
+        creator: &signer,
+        buyer: &signer,
+    ) {
+        setup(framework, exmarket, buyer);
+        account::create_account_for_test(signer::address_of(creator));
+
+        let seed = b"exmarket/prompt/buyme";
+        let prompt_id = prompt_registry::derive_prompt_id(
+            signer::address_of(creator),
+            seed,
+        );
+
+        prompt_registry::publish_prompt(
+            creator,
+            seed,
+            string::utf8(b"Buyable now"),
+            string::utf8(b"No linking step"),
+            string::utf8(b"Claude"),
+            tags(),
+            prompt_registry::pricing_pay_per_unlock(),
+            PRICE,
+            0,
+            string::utf8(b"0xcreator/buyme.txt"),
+            content_hash(),
+        );
+
+        payment::unlock_prompt(buyer, prompt_id);
+
+        assert!(access_control::has_access(signer::address_of(buyer), prompt_id), 1);
+        assert!(apt(signer::address_of(creator)) == PRICE * 9000 / 10000, 2);
+        assert!(apt(TREASURY) == PRICE * 1000 / 10000, 3);
+    }
+
+    // Reusing a seed must abort rather than quietly produce a second listing
+    // at the same address.
+    #[test(framework = @aptos_framework, exmarket = @exmarket, creator = @0xC)]
+    #[expected_failure(abort_code = 0x80001, location = aptos_framework::object)]
+    fun test_duplicate_seed_is_rejected(
+        framework: &signer,
+        exmarket: &signer,
+        creator: &signer,
+    ) {
+        setup(framework, exmarket, creator);
+        let seed = b"exmarket/prompt/same";
+
+        prompt_registry::publish_prompt(
+            creator, seed,
+            string::utf8(b"First"), string::utf8(b"First"), string::utf8(b"Other"),
+            tags(), prompt_registry::pricing_pay_per_unlock(), PRICE, 0,
+            string::utf8(b"0xcreator/a.txt"), content_hash(),
+        );
+        prompt_registry::publish_prompt(
+            creator, seed,
+            string::utf8(b"Second"), string::utf8(b"Second"), string::utf8(b"Other"),
+            tags(), prompt_registry::pricing_pay_per_unlock(), PRICE, 0,
+            string::utf8(b"0xcreator/b.txt"), content_hash(),
+        );
+    }
+
+    // The one-shot path enforces the same content-hash rule as link_blob.
+    #[test(framework = @aptos_framework, exmarket = @exmarket, creator = @0xC)]
+    #[expected_failure(abort_code = 9, location = exmarket::prompt_registry)]
+    fun test_publish_requires_valid_content_hash(
+        framework: &signer,
+        exmarket: &signer,
+        creator: &signer,
+    ) {
+        setup(framework, exmarket, creator);
+        // E_INVALID_CONTENT_HASH — 4 bytes instead of 32
+        prompt_registry::publish_prompt(
+            creator, b"exmarket/prompt/badhash",
+            string::utf8(b"Bad"), string::utf8(b"Bad"), string::utf8(b"Other"),
+            tags(), prompt_registry::pricing_pay_per_unlock(), PRICE, 0,
+            string::utf8(b"0xcreator/c.txt"), x"11223344",
+        );
+    }
+
     // ── Platform config ─────────────────────────────
 
     // The admin can move the treasury and fee, but never above the 20% cap.

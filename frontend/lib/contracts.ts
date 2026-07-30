@@ -178,6 +178,41 @@ export async function getUserTotalSpent(userAddr: string): Promise<number> {
 
 // ── Transaction Payloads ────────────────────────
 
+/// Publish a complete listing in one transaction.
+///
+/// The prompt lands at the named-object address derived from (creator, seed),
+/// which the client computes up front with `createObjectAddress` — so the
+/// content can be ACE-encrypted against the prompt id before anything is
+/// signed. Call this only after the Shelby upload succeeded: the listing is
+/// sellable the moment this transaction lands.
+export function buildPublishPromptPayload(params: {
+    seed: Uint8Array;
+    title: string;
+    description: string;
+    category: string;
+    tags: string[];
+    pricingModel: number;
+    price: number;
+    subscriptionPeriodSecs: number;
+    blobId: string;
+    contentHash: Uint8Array;
+}) {
+    return buildEntryPayload(`${MODULES.PROMPT_REGISTRY}::publish_prompt`, [
+        Array.from(params.seed),
+        params.title,
+        params.description,
+        params.category,
+        params.tags,
+        params.pricingModel,
+        params.price,
+        params.subscriptionPeriodSecs,
+        params.blobId,
+        Array.from(params.contentHash),
+    ]);
+}
+
+/// Legacy two-phase publishing. Superseded by buildPublishPromptPayload; kept
+/// because the on-chain entry functions still exist for older listings.
 /// Phase 1 of publishing: create the listing and get its prompt_id.
 /// The Shelby blob is attached separately via buildLinkBlobPayload, because
 /// the content has to be ACE-encrypted against the prompt_id first.

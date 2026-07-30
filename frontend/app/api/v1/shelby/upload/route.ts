@@ -90,12 +90,34 @@ function isRecoverableCompleteError(status: number, body: string) {
     );
 }
 
+/// Per-phase timings for one upload, logged on completion. The wall-clock cost
+/// of publishing sits almost entirely in here, so it should never be a guess.
+type UploadTimings = {
+    startMs: number;
+    startAttempts: number;
+    partMs: number;
+    completeMs: number;
+    completeAttempts: number;
+};
+
+function logUploadTimings(t: UploadTimings, payloadBytes: number, partSize: number) {
+    const total = t.startMs + t.partMs + t.completeMs;
+    console.info(
+        `Shelby upload: total ${total}ms ` +
+            `(start ${t.startMs}ms/${t.startAttempts} attempt(s), ` +
+            `part ${t.partMs}ms, complete ${t.completeMs}ms/${t.completeAttempts} attempt(s)) ` +
+            `payload=${payloadBytes}B declaredPartSize=${partSize}B`
+    );
+}
+
 async function startMultipartUpload(
     account: string,
     blobName: string,
-    partSize: number
+    partSize: number,
+    timings: UploadTimings
 ) {
     for (let attempt = 0; attempt <= SHELBY_START_RETRY_DELAYS_MS.length; attempt += 1) {
+        timings.startAttempts = attempt + 1;
         const response = await fetchWithTimeout(
             buildRpcUrl("/v1/multipart-uploads"),
             {
@@ -126,8 +148,9 @@ async function startMultipartUpload(
     throw new Error("Failed to start Shelby upload after retry.");
 }
 
-async function completeMultipartUpload(uploadId: string) {
+async function completeMultipartUpload(uploadId: string, timings: UploadTimings) {
     for (let attempt = 0; attempt <= SHELBY_COMPLETE_RETRY_DELAYS_MS.length; attempt += 1) {
+        timings.completeAttempts = attempt + 1;
         const response = await fetchWithTimeout(
             buildRpcUrl(`/v1/multipart-uploads/${uploadId}/complete`),
             {
@@ -234,13 +257,23 @@ export async function POST(req: NextRequest) {
         })
     );
 
+    const timings: UploadTimings = {
+        startMs: 0,
+        startAttempts: 0,
+        partMs: 0,
+        completeMs: 0,
+        completeAttempts: 0,
+    };
+
     try {
         const partSize = Math.max(
             payloadBytes.length,
             MIN_SHELBY_PART_SIZE_BYTES
         );
+        const startedAt = Date.now();
         const { response: startResponse, errorBody: startErrorBody } =
-            await startMultipartUpload(account, blobName, partSize);
+            await startMultipartUpload(account, blobName, partSize, timings);
+        timings.startMs = Date.now() - startedAt;
 
         if (!startResponse.ok) {
             return NextResponse.json(
@@ -254,6 +287,7 @@ export async function POST(req: NextRequest) {
         const { uploadId } = (await startResponse.json()) as { uploadId?: string };
         if (!uploadId) throw new Error("Shelby upload did not return an upload id.");
 
+        const partStartedAt = Date.now();
         const partResponse = await fetchWithTimeout(
             buildRpcUrl(`/v1/multipart-uploads/${uploadId}/parts/0`),
             {
@@ -264,6 +298,7 @@ export async function POST(req: NextRequest) {
             SHELBY_PART_TIMEOUT_MS,
             "Uploading encrypted content to Shelby"
         );
+        timings.partMs = Date.now() - partStartedAt;
 
         if (!partResponse.ok) {
             return NextResponse.json(
@@ -274,8 +309,11 @@ export async function POST(req: NextRequest) {
             );
         }
 
+        const completeStartedAt = Date.now();
         const { response: completeResponse, errorBody: completeErrorBody } =
-            await completeMultipartUpload(uploadId);
+            await completeMultipartUpload(uploadId, timings);
+        timings.completeMs = Date.now() - completeStartedAt;
+        logUploadTimings(timings, payloadBytes.length, partSize);
 
         if (!completeResponse.ok) {
             return NextResponse.json(

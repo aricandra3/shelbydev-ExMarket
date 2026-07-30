@@ -36,6 +36,7 @@ module exmarket::prompt_registry {
     const E_BLOB_NOT_LINKED: u64 = 11;
     const E_INVALID_FEE: u64 = 12;
     const E_EMPTY_BLOB_ID: u64 = 13;
+    const E_INVALID_SEED: u64 = 14;
 
     // ── Pricing Model Constants ─────────────────────
     const PRICING_PAY_PER_UNLOCK: u8 = 1;
@@ -52,6 +53,8 @@ module exmarket::prompt_registry {
     const DEFAULT_PLATFORM_FEE_BPS: u64 = 1000; // 10%
     /// sha2-256 digest of the encrypted payload stored on Shelby.
     const CONTENT_HASH_LEN: u64 = 32;
+    /// Upper bound on the client-supplied named-object seed.
+    const MAX_SEED_LEN: u64 = 64;
 
     // ── Structs ─────────────────────────────────────
 
@@ -177,7 +180,140 @@ module exmarket::prompt_registry {
         });
     }
 
+    // ── Internal Validation ─────────────────────────
+
+    /// Shared listing rules for both publishing paths.
+    fun assert_valid_listing(
+        pricing_model: u8,
+        price: u64,
+        subscription_period_secs: u64,
+    ) {
+        assert!(
+            pricing_model == PRICING_PAY_PER_UNLOCK
+                || pricing_model == PRICING_SUBSCRIPTION
+                || pricing_model == PRICING_API_PAY_PER_CALL,
+            E_INVALID_PRICING_MODEL,
+        );
+        assert!(price > 0, E_INVALID_PRICE);
+        assert!(exists<Registry>(@exmarket), E_REGISTRY_NOT_INITIALIZED);
+
+        if (pricing_model == PRICING_SUBSCRIPTION) {
+            assert!(subscription_period_secs > 0, E_INVALID_SUBSCRIPTION_PERIOD);
+        } else {
+            assert!(subscription_period_secs == 0, E_INVALID_SUBSCRIPTION_PERIOD);
+        };
+    }
+
+    /// Register the prompt under its creator and count it in the registry.
+    /// Bumping `prompt_count` also puts @exmarket in the write set of every
+    /// publish, which is what makes listings discoverable through the indexer.
+    fun index_new_prompt(
+        creator: &signer,
+        creator_addr: address,
+        prompt_id: address,
+    ) acquires CreatorProfile, Registry {
+        if (!exists<CreatorProfile>(creator_addr)) {
+            move_to(creator, CreatorProfile {
+                prompts: vector::empty<address>(),
+                total_revenue: 0,
+            });
+        };
+        let profile = borrow_global_mut<CreatorProfile>(creator_addr);
+        vector::push_back(&mut profile.prompts, prompt_id);
+
+        let registry = borrow_global_mut<Registry>(@exmarket);
+        registry.prompt_count = registry.prompt_count + 1;
+    }
+
     // ── Entry Functions ─────────────────────────────
+
+    /// Publish a fully-formed listing in a single transaction.
+    ///
+    /// The prompt lives at a *named* object address derived from
+    /// (creator, seed), which the client can compute before signing anything.
+    /// That breaks the old chicken-and-egg problem: ACE encryption needs the
+    /// prompt id, and the old flow could only learn it by registering first.
+    ///
+    /// Publishing therefore becomes: derive the id → encrypt → register the
+    /// blob with Shelby → upload → publish here. The listing is born complete
+    /// and sellable, and there is no window where a prompt exists on-chain
+    /// without its content already stored on Shelby.
+    ///
+    /// Use `derive_prompt_id` to compute the address the same way off-chain.
+    public entry fun publish_prompt(
+        creator: &signer,
+        seed: vector<u8>,
+        title: String,
+        description: String,
+        category: String,
+        tags: vector<String>,
+        pricing_model: u8,
+        price: u64,
+        subscription_period_secs: u64,
+        blob_id: String,
+        content_hash: vector<u8>,
+    ) acquires CreatorProfile, Registry {
+        assert_valid_listing(pricing_model, price, subscription_period_secs);
+        assert!(
+            !vector::is_empty(&seed) && vector::length(&seed) <= MAX_SEED_LEN,
+            E_INVALID_SEED,
+        );
+        assert!(!std::string::is_empty(&blob_id), E_EMPTY_BLOB_ID);
+        assert!(
+            vector::length(&content_hash) == CONTENT_HASH_LEN,
+            E_INVALID_CONTENT_HASH,
+        );
+
+        let creator_addr = signer::address_of(creator);
+        let now = timestamp::now_seconds();
+
+        // Named object: address is a pure function of (creator, seed), so a
+        // repeated seed aborts instead of silently creating a second listing.
+        let constructor_ref = object::create_named_object(creator, seed);
+        let object_signer = object::generate_signer(&constructor_ref);
+        let prompt_id = object::address_from_constructor_ref(&constructor_ref);
+
+        move_to(&object_signer, PromptMetadata {
+            creator: creator_addr,
+            blob_id,
+            title,
+            description,
+            category,
+            tags,
+            pricing_model,
+            price,
+            status: STATUS_ACTIVE,
+            created_at: now,
+            updated_at: now,
+            total_unlocks: 0,
+            total_revenue: 0,
+            subscription_period_secs,
+            content_hash,
+            blob_linked: true,
+        });
+
+        index_new_prompt(creator, creator_addr, prompt_id);
+
+        event::emit(PromptRegistered {
+            prompt_id,
+            creator: creator_addr,
+            blob_id,
+            title,
+            category,
+            price,
+            pricing_model,
+            subscription_period_secs,
+            timestamp: now,
+        });
+
+        event::emit(BlobLinked {
+            prompt_id,
+            creator: creator_addr,
+            blob_id,
+            content_hash,
+            timestamp: now,
+        });
+    }
 
     /// Creator registers a new prompt listing.
     ///
@@ -198,21 +334,7 @@ module exmarket::prompt_registry {
         price: u64,
         subscription_period_secs: u64,
     ) acquires CreatorProfile, Registry {
-        // Validate inputs
-        assert!(
-            pricing_model == PRICING_PAY_PER_UNLOCK
-                || pricing_model == PRICING_SUBSCRIPTION
-                || pricing_model == PRICING_API_PAY_PER_CALL,
-            E_INVALID_PRICING_MODEL,
-        );
-        assert!(price > 0, E_INVALID_PRICE);
-        assert!(exists<Registry>(@exmarket), E_REGISTRY_NOT_INITIALIZED);
-
-        if (pricing_model == PRICING_SUBSCRIPTION) {
-            assert!(subscription_period_secs > 0, E_INVALID_SUBSCRIPTION_PERIOD);
-        } else {
-            assert!(subscription_period_secs == 0, E_INVALID_SUBSCRIPTION_PERIOD);
-        };
+        assert_valid_listing(pricing_model, price, subscription_period_secs);
 
         let creator_addr = signer::address_of(creator);
         let now = timestamp::now_seconds();
@@ -241,18 +363,7 @@ module exmarket::prompt_registry {
             blob_linked: false,
         });
 
-        // Update creator profile
-        if (!exists<CreatorProfile>(creator_addr)) {
-            move_to(creator, CreatorProfile {
-                prompts: vector::empty<address>(),
-                total_revenue: 0,
-            });
-        };
-        let profile = borrow_global_mut<CreatorProfile>(creator_addr);
-        vector::push_back(&mut profile.prompts, prompt_id);
-
-        let registry = borrow_global_mut<Registry>(@exmarket);
-        registry.prompt_count = registry.prompt_count + 1;
+        index_new_prompt(creator, creator_addr, prompt_id);
 
         // Emit event
         event::emit(PromptRegistered {
@@ -394,6 +505,14 @@ module exmarket::prompt_registry {
             m.content_hash,
             m.blob_linked,
         )
+    }
+
+    // Address a `publish_prompt(creator, seed, ...)` call will occupy. Lets the
+    // client derive the prompt id — and therefore the ACE domain — before
+    // signing anything, and verify its own derivation against the chain.
+    #[view]
+    public fun derive_prompt_id(creator: address, seed: vector<u8>): address {
+        object::create_object_address(&creator, seed)
     }
 
     #[view]
