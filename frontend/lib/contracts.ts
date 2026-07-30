@@ -1,7 +1,7 @@
 /// Smart contract interaction helpers
 
 import { viewFunction, buildEntryPayload } from "./aptos";
-import { MODULES, REGISTRY_ADDRESS } from "./constants";
+import { MODULES } from "./constants";
 import {
     findPromptInRegistry,
     getCreatorPromptIdsFromRegistry,
@@ -32,6 +32,8 @@ export async function getPromptMetadata(
         3: "api-pay-per-call",
     };
 
+    const blobLinked = Boolean(result[12]);
+
     return {
         promptId,
         creator: result[0] as string,
@@ -41,13 +43,30 @@ export async function getPromptMetadata(
         category: result[4] as string,
         pricingModel: pricingMap[result[5] as number] || "pay-per-unlock",
         price: Number(result[6]),
-        status: (result[7] as number) === 1 ? "active" : "inactive",
+        // A listing whose Shelby blob is not linked yet cannot be bought,
+        // so surface it as inactive rather than as a live listing.
+        status: (result[7] as number) === 1 && blobLinked ? "active" : "inactive",
         totalUnlocks: Number(result[8]),
         totalRevenue: Number(result[9]),
+        subscriptionPeriodSecs: Number(result[10] ?? 0),
+        contentHash: normalizeHash(result[11]),
+        blobLinked,
         tags: [],
         createdAt: 0,
         updatedAt: 0,
     };
+}
+
+/// Move returns vector<u8> as a hex string ("0x..") over the REST API, but
+/// tolerate a byte array in case a node serializes it that way.
+function normalizeHash(value: unknown): string {
+    if (typeof value === "string") return value;
+    if (Array.isArray(value)) {
+        return `0x${value
+            .map((byte) => Number(byte).toString(16).padStart(2, "0"))
+            .join("")}`;
+    }
+    return "";
 }
 
 export async function getPromptPrice(promptId: string): Promise<number> {
@@ -159,26 +178,34 @@ export async function getUserTotalSpent(userAddr: string): Promise<number> {
 
 // ── Transaction Payloads ────────────────────────
 
+/// Phase 1 of publishing: create the listing and get its prompt_id.
+/// The Shelby blob is attached separately via buildLinkBlobPayload, because
+/// the content has to be ACE-encrypted against the prompt_id first.
+///
+/// `subscriptionPeriodSecs` must be > 0 for subscription listings (it defines
+/// what one `price` buys) and 0 for every other pricing model.
 export function buildRegisterPromptPayload(
-    blobId: string,
     title: string,
     description: string,
     category: string,
     tags: string[],
     pricingModel: number,
-    price: number
+    price: number,
+    subscriptionPeriodSecs: number
 ) {
-    return buildEntryPayload(
-        `${MODULES.PROMPT_REGISTRY}::register_prompt`,
-        [blobId, title, description, category, tags, pricingModel, price]
-    );
+    return buildEntryPayload(`${MODULES.PROMPT_REGISTRY}::register_prompt`, [
+        title,
+        description,
+        category,
+        tags,
+        pricingModel,
+        price,
+        subscriptionPeriodSecs,
+    ]);
 }
 
 export function buildUnlockPromptPayload(promptId: string) {
-    return buildEntryPayload(`${MODULES.PAYMENT}::unlock_prompt`, [
-        promptId,
-        REGISTRY_ADDRESS,
-    ]);
+    return buildEntryPayload(`${MODULES.PAYMENT}::unlock_prompt`, [promptId]);
 }
 
 export function buildPurchaseApiCallsPayload(
@@ -188,18 +215,15 @@ export function buildPurchaseApiCallsPayload(
     return buildEntryPayload(`${MODULES.PAYMENT}::purchase_api_calls`, [
         promptId,
         numCalls,
-        REGISTRY_ADDRESS,
     ]);
 }
 
-export function buildSubscribePayload(
-    promptId: string,
-    durationSecs: number
-) {
+/// The period length lives on the listing; the buyer only chooses how many
+/// periods to pay for.
+export function buildSubscribePayload(promptId: string, numPeriods: number) {
     return buildEntryPayload(`${MODULES.PAYMENT}::subscribe_prompt`, [
         promptId,
-        durationSecs,
-        REGISTRY_ADDRESS,
+        numPeriods,
     ]);
 }
 
@@ -210,11 +234,33 @@ export function buildUpdatePricePayload(promptId: string, newPrice: number) {
     ]);
 }
 
-export function buildUpdateBlobIdPayload(promptId: string, newBlobId: string) {
-    return buildEntryPayload(`${MODULES.PROMPT_REGISTRY}::update_blob_id`, [
+/// Phase 2 of publishing: attach the Shelby blob and pin its content hash.
+/// Rejected once the listing has its first sale, so buyers can rely on the
+/// content not changing after they pay.
+export function buildLinkBlobPayload(
+    promptId: string,
+    blobId: string,
+    contentHash: Uint8Array
+) {
+    return buildEntryPayload(`${MODULES.PROMPT_REGISTRY}::link_blob`, [
         promptId,
-        newBlobId,
+        blobId,
+        Array.from(contentHash),
     ]);
+}
+
+export function buildDeactivatePromptPayload(promptId: string) {
+    return buildEntryPayload(
+        `${MODULES.PROMPT_REGISTRY}::deactivate_prompt`,
+        [promptId]
+    );
+}
+
+export function buildReactivatePromptPayload(promptId: string) {
+    return buildEntryPayload(
+        `${MODULES.PROMPT_REGISTRY}::reactivate_prompt`,
+        [promptId]
+    );
 }
 
 export function buildConsumeApiCallPayload(promptId: string) {

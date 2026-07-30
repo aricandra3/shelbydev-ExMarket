@@ -39,8 +39,8 @@ export const SHELBY_CONTRACT_ADDRESS =
 export const MODULE_ADDRESS =
     process.env.NEXT_PUBLIC_MODULE_ADDRESS || "0x0"; // Set after deployment
 
-export const REGISTRY_ADDRESS =
-    process.env.NEXT_PUBLIC_REGISTRY_ADDRESS || MODULE_ADDRESS;
+// The platform Registry always lives at the module address — payment flows read
+// it from @exmarket on-chain, so there is nothing to configure per environment.
 
 // ── Module names ────────────────────────────────
 export const MODULES = {

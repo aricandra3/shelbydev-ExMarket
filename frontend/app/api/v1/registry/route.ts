@@ -18,8 +18,10 @@ export const dynamic = "force-dynamic";
 const CACHE_TTL_MS = 60_000;
 const TRANSACTION_SCAN_LIMIT = 200;
 const TRANSACTION_FETCH_CONCURRENCY = 4;
-const INDEXER_PAGE_SIZE = 5;
-const INDEXER_MAX_PAGES = 2;
+// Each published prompt costs two indexer rows (register_prompt + link_blob),
+// so keep enough headroom to surface a meaningful number of listings.
+const INDEXER_PAGE_SIZE = 25;
+const INDEXER_MAX_PAGES = 4;
 const METADATA_ENRICH_LIMIT = 80;
 const METADATA_ENRICH_CONCURRENCY = 2;
 const RATE_LIMIT_STATUS = 429;
@@ -96,10 +98,13 @@ async function fetchWithRetry(url: string, init: RequestInit, retries = 2) {
 async function fetchIndexerRegisterPage(
     offset: number
 ): Promise<Array<number | string>> {
+    // A published prompt spans two transactions: register_prompt creates the
+    // listing, link_blob attaches the Shelby blob and makes it purchasable.
+    // Both are needed to reconstruct a complete listing from events alone.
     const query = `
-        query PromptRegistrations($entryFunction: String!, $limit: Int!, $offset: Int!) {
+        query PromptRegistrations($entryFunctions: [String!], $limit: Int!, $offset: Int!) {
             user_transactions(
-                where: { entry_function_id_str: { _eq: $entryFunction } }
+                where: { entry_function_id_str: { _in: $entryFunctions } }
                 order_by: { version: desc }
                 limit: $limit
                 offset: $offset
@@ -116,7 +121,10 @@ async function fetchIndexerRegisterPage(
         body: JSON.stringify({
             query,
             variables: {
-                entryFunction: `${MODULES.PROMPT_REGISTRY}::register_prompt`,
+                entryFunctions: [
+                    `${MODULES.PROMPT_REGISTRY}::register_prompt`,
+                    `${MODULES.PROMPT_REGISTRY}::link_blob`,
+                ],
                 limit: INDEXER_PAGE_SIZE,
                 offset,
             },
@@ -222,9 +230,15 @@ async function enrichPromptMetadata(
             category: String(result[4]),
             pricingModel: pricingMap[Number(result[5])] || "pay-per-unlock",
             price: Number(result[6]),
-            status: Number(result[7]) === 1 ? "active" : "inactive",
+            status:
+                Number(result[7]) === 1 && Boolean(result[12])
+                    ? "active"
+                    : "inactive",
             totalUnlocks: Number(result[8]),
             totalRevenue: Number(result[9]),
+            subscriptionPeriodSecs: Number(result[10]) || 0,
+            contentHash: String(result[11] ?? ""),
+            blobLinked: Boolean(result[12]),
         };
     } catch (error) {
         console.warn(`Prompt metadata enrichment failed for ${prompt.promptId}`, error);
@@ -319,15 +333,27 @@ async function loadPrompts(force = false): Promise<PromptMetadata[]> {
         const registeredTarget = `${MODULE_ADDRESS}::prompt_registry::PromptRegistered`;
         const updatedTarget = `${MODULE_ADDRESS}::prompt_registry::PromptUpdated`;
         const deactivatedTarget = `${MODULE_ADDRESS}::prompt_registry::PromptDeactivated`;
+        const blobLinkedTarget = `${MODULE_ADDRESS}::prompt_registry::BlobLinked`;
         const txns = await fetchRegistryTransactions();
         const registered = new Map<string, PromptMetadata>();
         const deactivated = new Set<string>();
         const updatedPrices = new Map<string, number>();
+        const linkedBlobs = new Map<string, { blobId: string; contentHash: string }>();
 
         txns.flatMap((tx) => tx.events ?? []).forEach((event) => {
             if (event.type === deactivatedTarget) {
                 if (typeof event.data.prompt_id === "string") {
                     deactivated.add(event.data.prompt_id);
+                }
+                return;
+            }
+
+            if (event.type === blobLinkedTarget) {
+                if (typeof event.data.prompt_id === "string") {
+                    linkedBlobs.set(event.data.prompt_id, {
+                        blobId: String(event.data.blob_id ?? ""),
+                        contentHash: String(event.data.content_hash ?? ""),
+                    });
                 }
                 return;
             }
@@ -361,21 +387,36 @@ async function loadPrompts(force = false): Promise<PromptMetadata[]> {
                           ? "api-pay-per-call"
                           : "pay-per-unlock",
                 price: Number(event.data.price),
-                status: "active",
+                // Listings start unlinked and unsellable; a BlobLinked event
+                // (below) is what promotes them to active.
+                status: "inactive",
                 totalUnlocks: 0,
                 totalRevenue: 0,
                 tags: [],
                 createdAt: Number(event.data.timestamp) || 0,
                 updatedAt: Number(event.data.timestamp) || 0,
+                subscriptionPeriodSecs: Number(event.data.subscription_period_secs) || 0,
+                blobLinked: false,
             });
         });
 
         const basePrompts = Array.from(registered.values())
             .filter((prompt) => !deactivated.has(prompt.promptId))
-            .map((prompt) => ({
-                ...prompt,
-                price: updatedPrices.get(prompt.promptId) ?? prompt.price,
-            }));
+            .map((prompt) => {
+                const linked = linkedBlobs.get(prompt.promptId);
+
+                return {
+                    ...prompt,
+                    price: updatedPrices.get(prompt.promptId) ?? prompt.price,
+                    blobId: linked?.blobId ?? prompt.blobId,
+                    contentHash: linked?.contentHash ?? prompt.contentHash,
+                    blobLinked: Boolean(linked),
+                    status: linked ? ("active" as const) : ("inactive" as const),
+                };
+            })
+            // Nothing to sell until the Shelby blob is attached — keep
+            // half-published listings out of the marketplace.
+            .filter((prompt) => prompt.blobLinked);
         const prompts = await enrichRecentPrompts(basePrompts, !force);
 
         cache = { prompts, timestamp: Date.now() };

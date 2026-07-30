@@ -25,23 +25,38 @@ export interface PromptMetadata {
     category: string;
     tags: string[];
     pricingModel: PricingModel;
-    price: number; // in octas
+    price: number; // in octas — for subscriptions this buys one period
     status: "active" | "inactive";
     createdAt: number;
     updatedAt: number;
     totalUnlocks: number;
     totalRevenue: number;
+    /** Length of one billing period in seconds. 0 unless pricingModel is "subscription". */
+    subscriptionPeriodSecs?: number;
+    /** Hex sha-256 of the encrypted payload pinned on-chain. Empty until the blob is linked. */
+    contentHash?: string;
+    /** False while the listing has no Shelby blob yet — such listings are not purchasable. */
+    blobLinked?: boolean;
 }
 
 export interface PromptInput {
-    blobId: string;
     title: string;
     description: string;
     category: string;
     tags: string[];
     pricingModel: PricingModel;
     price: number;
+    subscriptionPeriodSecs: number;
 }
+
+// ── Subscription period presets ─────────────────
+export const SUBSCRIPTION_PERIODS = [
+    { key: "weekly", label: "Weekly", seconds: 604_800 },
+    { key: "monthly", label: "Monthly (30d)", seconds: 2_592_000 },
+    { key: "yearly", label: "Yearly (365d)", seconds: 31_536_000 },
+] as const;
+
+export type SubscriptionPeriodKey = (typeof SUBSCRIPTION_PERIODS)[number]["key"];
 
 // ── Categories ──────────────────────────────────
 export const PROMPT_CATEGORIES = [

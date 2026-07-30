@@ -9,12 +9,15 @@ ExMarket lets users create, sell, and unlock AI prompts stored on-chain via Shel
 ```
 shelbydev/
 ├── contracts/          # Aptos Move smart contracts
-│   └── sources/
-│       ├── access_control.move    # Prompt access gating
-│       ├── payment.move           # Purchase & payment flow
-│       ├── prompt_registry.move   # Prompt registration & metadata
-│       ├── revenue_split.move     # Creator revenue distribution
-│       └── unlock_history.move    # On-chain unlock records
+│   ├── sources/
+│   │   ├── access_control.move     # Prompt access gating
+│   │   ├── ace_access_control.move # check_permission bridge for ACE workers
+│   │   ├── payment.move            # Purchase & payment flow
+│   │   ├── prompt_registry.move    # Prompt registration & metadata
+│   │   ├── revenue_split.move      # Platform fee accounting & admin
+│   │   └── unlock_history.move     # On-chain unlock records
+│   └── tests/
+│       └── payment_tests.move      # Money-path tests (fee split, pricing, expiry)
 └── frontend/           # Next.js web app
     ├── app/            # App Router pages (dashboard, explore, create, library, prompt)
     ├── components/     # Reusable UI components
@@ -23,16 +26,39 @@ shelbydev/
     └── types/          # TypeScript type definitions
 ```
 
+## On-chain guarantees
+
+The contracts enforce the marketplace rules rather than relying on the UI:
+
+| Guarantee | Where |
+|---|---|
+| Fee split always pays the treasury registered at `@exmarket` — no caller-supplied registry | `prompt_registry::get_platform_config` |
+| Platform fee is capped at 20%, admin-only, and every change is emitted as an event | `prompt_registry::set_platform_config` |
+| Each pricing model can only be bought through its own entry function | `payment::assert_purchasable` |
+| Subscription length is set by the creator; buyers choose how many periods, and renewing extends instead of resetting | `payment::subscribe_prompt`, `access_control::grant_access` |
+| Nothing is sellable until its Shelby blob is linked | `prompt_registry::is_prompt_active` |
+| Content is frozen after the first sale, and its sha-256 is pinned on-chain | `prompt_registry::link_blob` |
+
+Run the test suite:
+
+```bash
+cd contracts && aptos move test --named-addresses exmarket=default
+```
+
 ## Quick Start
 
 ### 1. Deploy Contracts
 
+The `Registry` and `PlatformAdmin` resources live at `@exmarket`, so the
+publishing account **is** the admin account — `initialize` rejects anyone else.
+
 ```bash
 cd contracts
+aptos move test --named-addresses exmarket=default
 aptos move compile --named-addresses exmarket=default
 aptos move publish --named-addresses exmarket=default
 
-# Initialize modules
+# Initialize modules (must be signed by the publishing account)
 aptos move run --function-id default::prompt_registry::initialize \
   --args address:YOUR_TREASURY_ADDRESS
 
@@ -40,6 +66,16 @@ aptos move run --function-id default::revenue_split::initialize
 ```
 
 Copy the deployed address and set it as `NEXT_PUBLIC_MODULE_ADDRESS` in `frontend/.env.local`.
+
+> **Upgrading from an earlier deployment:** `PromptMetadata` gained fields and
+> the payment entry functions changed shape, so Aptos will reject an in-place
+> module upgrade. Publish to a fresh account and point
+> `NEXT_PUBLIC_MODULE_ADDRESS` at it; listings from the old address are not
+> migrated.
+
+> **Framework pin:** `Move.toml` tracks the `mainnet` framework branch. The
+> `testnet` branch currently uses spec syntax that Aptos CLI 8.1.0 cannot
+> compile.
 
 ### 2. Run Frontend
 

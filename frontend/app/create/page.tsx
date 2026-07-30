@@ -8,8 +8,8 @@ import { useRouter } from "next/navigation";
 import { useAppWallet } from "@/components/wallet/walletContext";
 import { invalidateViewCache, waitForTransaction } from "@/lib/aptos";
 import {
+    buildLinkBlobPayload,
     buildRegisterPromptPayload,
-    buildUpdateBlobIdPayload,
     getCreatorPrompts,
     getPromptMetadata,
 } from "@/lib/contracts";
@@ -18,8 +18,8 @@ import {
     rememberPromptInRegistry,
 } from "@/lib/promptRegistry";
 import { aptToOctas, PROMPT_CATEGORIES } from "@/lib/constants";
-import { PRICING_MODEL_REVERSE } from "@/types";
-import type { PricingModel } from "@/types";
+import { PRICING_MODEL_REVERSE, SUBSCRIPTION_PERIODS } from "@/types";
+import type { PricingModel, SubscriptionPeriodKey } from "@/types";
 import { getErrorMessage } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -50,7 +50,16 @@ type PublishRecovery = {
     ciphertextHex: string;
     domainHex: string;
     accountAddress: string;
+    /** sha-256 of the exact bytes uploaded to Shelby, pinned on-chain at link time. */
+    contentHash: Uint8Array;
 };
+
+/// Hash the bytes that go to Shelby so the on-chain listing commits to the
+/// stored payload. Buyers can re-hash what they download and compare.
+async function sha256(bytes: Uint8Array): Promise<Uint8Array> {
+    const digest = await crypto.subtle.digest("SHA-256", bytes as BufferSource);
+    return new Uint8Array(digest);
+}
 
 const BUSY_STEPS = new Set<PublishStep>([
     "registering-prompt",
@@ -84,6 +93,7 @@ export default function CreatePage() {
         category: "ChatGPT",
         tags: "",
         pricingModel: "pay-per-unlock" as PricingModel,
+        subscriptionPeriod: "monthly" as SubscriptionPeriodKey,
         price: "",
         content: "",
     });
@@ -141,9 +151,13 @@ export default function CreatePage() {
 
         const blobId = `${publish.accountAddress}/${publish.blobName}`;
         setStep("updating-prompt");
-        setStatusDetail("Waiting for wallet signature for tx 3: link blob_id to prompt...");
+        setStatusDetail("Waiting for wallet signature for tx 3: link blob and pin content hash...");
 
-        const updatePayload = buildUpdateBlobIdPayload(publish.promptId, blobId);
+        const updatePayload = buildLinkBlobPayload(
+            publish.promptId,
+            blobId,
+            publish.contentHash
+        );
         const updateResponse = await signAndSubmitTransaction({ data: updatePayload });
 
         setStatusDetail("Confirming tx 3 on-chain...");
@@ -209,35 +223,55 @@ export default function CreatePage() {
 
             const priceInOctas = aptToOctas(price);
             const pricingModelNum = PRICING_MODEL_REVERSE[form.pricingModel];
+            // Only subscription listings carry a period; the contract rejects a
+            // non-zero period on any other model.
+            const subscriptionPeriodSecs =
+                form.pricingModel === "subscription"
+                    ? SUBSCRIPTION_PERIODS.find(
+                          (period) => period.key === form.subscriptionPeriod
+                      )?.seconds ?? 0
+                    : 0;
 
-            // ─── PHASE 1: Register on-chain with placeholder blob_id ──────────
+            // ─── PHASE 1: Create the listing (no content attached yet) ────────
             // We need the real on-chain prompt_id (Aptos Object address) BEFORE
-            // we can ACE-encrypt — ACE domain = SHA3(prompt_id hex), and
+            // we can ACE-encrypt — the ACE domain encodes the prompt_id, and
             // check_permission validates access_control::has_access(user, prompt_id).
-            const placeholderBlobId = "pending";
+            // The listing is not purchasable until tx 3 links the Shelby blob.
             const payload = buildRegisterPromptPayload(
-                placeholderBlobId,
                 title,
                 description,
                 form.category,
                 tags,
                 pricingModelNum,
-                priceInOctas
+                priceInOctas,
+                subscriptionPeriodSecs
             );
 
             const registerResponse = await signAndSubmitTransaction({ data: payload });
             setStatusDetail("Confirming tx 1 on-chain...");
-            await waitForTransaction(registerResponse.hash, { checkSuccess: true });
-
-            // Fetch the real prompt_id: it's the last address in creator's prompts list
-            setStatusDetail("Reading the new prompt id from Aptos...");
-            const creatorPrompts = await getCreatorPrompts(accountAddress, {
-                fresh: true,
+            const registerReceipt = await waitForTransaction(registerResponse.hash, {
+                checkSuccess: true,
             });
-            if (!creatorPrompts || creatorPrompts.length === 0) {
+
+            // Prefer the prompt_id from the PromptRegistered event — reading the
+            // creator's list instead would pick the wrong listing whenever two
+            // publishes overlap, and the blob link is irreversible after a sale.
+            let promptId: string | undefined =
+                typeof registerReceipt?.promptId === "string"
+                    ? registerReceipt.promptId
+                    : undefined;
+
+            if (!promptId) {
+                setStatusDetail("Reading the new prompt id from Aptos...");
+                const creatorPrompts = await getCreatorPrompts(accountAddress, {
+                    fresh: true,
+                });
+                promptId = creatorPrompts?.[creatorPrompts.length - 1];
+            }
+
+            if (!promptId) {
                 throw new Error("Could not retrieve prompt_id after on-chain registration");
             }
-            const promptId = creatorPrompts[creatorPrompts.length - 1];
 
             // ─── PHASE 2: ACE-encrypt with the REAL on-chain prompt_id ────────
             // Now the domain encodes the actual Object address, so ACE workers
@@ -298,6 +332,7 @@ export default function CreatePage() {
                 ciphertextHex,
                 domainHex,
                 accountAddress,
+                contentHash: await sha256(uploadBytes),
             };
             setRecovery(recoveryData);
             await finalizePublish(recoveryData);
@@ -472,10 +507,45 @@ export default function CreatePage() {
                                             </div>
                                         </div>
 
+                                        {/* Billing period — subscriptions only */}
+                                        {form.pricingModel === "subscription" && (
+                                            <div>
+                                                <label className="mb-2 block text-xs font-black uppercase tracking-widest text-cream/65">
+                                                    Billing Period
+                                                </label>
+                                                <select
+                                                    className="input-field"
+                                                    value={form.subscriptionPeriod}
+                                                    onChange={(e) =>
+                                                        setForm({
+                                                            ...form,
+                                                            subscriptionPeriod: e.target
+                                                                .value as SubscriptionPeriodKey,
+                                                        })
+                                                    }
+                                                >
+                                                    {SUBSCRIPTION_PERIODS.map((period) => (
+                                                        <option key={period.key} value={period.key}>
+                                                            {period.label}
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                                <p className="mt-2 text-xs font-semibold text-cream/35">
+                                                    The price below buys exactly one period. Buyers
+                                                    choose how many periods to pay for — they cannot
+                                                    set their own duration.
+                                                </p>
+                                            </div>
+                                        )}
+
                                         {/* Price */}
                                         <div>
                                             <label className="mb-2 block text-xs font-black uppercase tracking-widest text-cream/65">
-                                                Price (APT)
+                                                {form.pricingModel === "subscription"
+                                                    ? "Price per Period (APT)"
+                                                    : form.pricingModel === "api-pay-per-call"
+                                                      ? "Price per API Call (APT)"
+                                                      : "Price (APT)"}
                                             </label>
                                             <Input
                                                 type="number"
