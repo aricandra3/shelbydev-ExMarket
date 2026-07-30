@@ -91,7 +91,8 @@ export default function PromptDetailPage() {
                     import("@/lib/ace"),
                     import("@aptos-labs/ts-sdk"),
                 ]);
-                const { ciphertextHex, domainHex } = await shelbyService.readEncryptedBlob(prompt.blobId);
+                const { ciphertextHex, domainHex } =
+                    await shelbyService.readEncryptedBlob(promptId);
 
                 // 2. Ask the wallet to sign the ACE permission message
                 //    This proves to ACE workers that the user controls this account

@@ -23,7 +23,7 @@ import {
 } from "@/lib/contractsServer";
 import { aptosServerClient } from "@/lib/aptosServer";
 import { MODULES } from "@/lib/constants";
-import { shelbyService } from "@/lib/shelby";
+import { readEncryptedBlobServer } from "@/lib/shelbyServer";
 import { isRateLimitError } from "@/lib/utils";
 import { checkRateLimit, rateLimitHeaders } from "@/lib/apiSecurity";
 import {
@@ -254,10 +254,10 @@ export async function GET(req: NextRequest, { params }: PromptRouteContext) {
             );
         }
 
-        // readEncryptedBlob throws on failure, unlike readPrompt which returns
-        // its error as if it were content — a 200 carrying "Failed to load..."
-        // is worse than an honest 502.
-        const { ciphertextHex, domainHex } = await shelbyService.readEncryptedBlob(
+        // Reads go through the server-side helper so egress is billed to this
+        // project's Shelby key, and it throws on failure — unlike the old
+        // readPrompt, which returned its error as if it were content.
+        const { ciphertextHex, domainHex } = await readEncryptedBlobServer(
             metadata.blobId
         );
 

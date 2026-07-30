@@ -1,13 +1,18 @@
-/// Shelby SDK integration — blob upload and read operations
+/// Browser-side Shelby helpers.
 /// Docs: https://docs.shelby.xyz/sdks/typescript
-/// Networks: https://docs.shelby.xyz/protocol/architecture/networks
+///
+/// Neither uploads nor reads talk to Shelby directly from here: both go through
+/// our API routes so the project's SHELBY_API_KEY stays server-side and the
+/// storage and egress it pays for stay accounted for.
 ///
 /// ACE integration pattern:
-///   - Creator: aceEncrypt(content) → putEncryptedBlob({ ciphertext, domain })
-///   - Buyer:   readEncryptedBlob(blobId) → aceDecrypt(ciphertext, domain, proof)
+///   - Creator: aceEncrypt(content) → startEncryptedBlobUpload + finalizeUpload
+///   - Buyer:   readEncryptedBlob(promptId) → aceDecrypt(ciphertext, domain, proof)
+///
+/// What is still imported from the SDK is the erasure-coding maths the create
+/// flow needs to compute a blob's commitments before registering it on L1.
 
 import {
-    ShelbyClient,
     ShelbyBlobClient,
     generateCommitments,
     ClayErasureCodingProvider,
@@ -16,20 +21,9 @@ import {
     expectedTotalChunksets,
 } from "@shelby-protocol/sdk/browser";
 
-import { NETWORK } from "./constants";
-
 const SHELBY_COMPLETE_TIMEOUT_MS = 180_000;
 
-// ─────────────────────────────────────────────────
-// Shelby Client
-// ─────────────────────────────────────────────────
-
-const shelbyClient = new ShelbyClient({
-    network: NETWORK === "shelbynet" ? ("shelbynet" as any) : ("testnet" as any),
-});
-
 export {
-    shelbyClient,
     ShelbyBlobClient,
     generateCommitments,
     ClayErasureCodingProvider,
@@ -37,26 +31,6 @@ export {
     defaultErasureCodingConfig,
     expectedTotalChunksets,
 };
-
-function parseBlobId(blobId: string) {
-    const trimmedBlobId = blobId.trim();
-    if (!trimmedBlobId || trimmedBlobId === "pending") {
-        throw new Error(
-            "Prompt content is not ready yet. The encrypted Shelby blob has not been linked on-chain."
-        );
-    }
-
-    const [account, ...nameParts] = trimmedBlobId.split("/");
-    const blobName = nameParts.join("/").trim();
-
-    if (!account || !blobName) {
-        throw new Error(
-            "Prompt content is unavailable because its Shelby blob reference is incomplete."
-        );
-    }
-
-    return { account, blobName };
-}
 
 /// Signs the proof the upload endpoint requires. The wallet returns the exact
 /// string it signed (`fullMessage`, usually wrapped in its own preamble), so we
@@ -148,40 +122,6 @@ const SHELBY_START_TIMEOUT_MS = 60_000;
 
 export const shelbyService = {
     /**
-     * Upload a prompt string as a blob to Shelby storage.
-     * Uses rpc.putBlob to avoid needing a raw private key —
-     * L1 registration is handled via wallet on the client side.
-     */
-    async putBlobDirectly(content: string, address: string, blobName: string): Promise<void> {
-        const blobData = new TextEncoder().encode(content);
-
-        await shelbyClient.rpc.putBlob({
-            account: address,
-            blobName,
-            blobData,
-        });
-    },
-
-    /**
-     * Read a prompt blob from Shelby storage.
-     * blobId format: "<account>/<blobName>"
-     */
-    async readPrompt(blobId: string): Promise<string> {
-        try {
-            if (blobId.startsWith("dummy_blob")) {
-                return "This is a dummy prompt content (upload failed or bypassed for testing).";
-            }
-
-            const { account, blobName } = parseBlobId(blobId);
-
-            const result = await shelbyClient.download({ account, blobName });
-            return await new Response(result.readable).text();
-        } catch (e) {
-            console.error("Failed to read blob", e);
-            return "Failed to load content from Shelby.";
-        }
-    },
-    /**
      * Transfer an ACE-encrypted prompt blob to Shelby, without finalizing it.
      * Stores a JSON payload: { ciphertextHex, domainHex }
      *
@@ -263,19 +203,34 @@ export const shelbyService = {
     },
 
     /**
-     * Read an ACE-encrypted prompt blob from Shelby.
-     * blobId format: "<account>/<blobName>"
+     * Read an ACE-encrypted prompt blob for a listing.
+     *
+     * Goes through /api/v1/shelby/blob rather than hitting Shelby directly, so
+     * the read is billed to this project's Shelby API key instead of being
+     * anonymous. The proxy resolves the blob path from on-chain metadata, which
+     * is why this takes a promptId and not a blob path.
      *
      * Returns { ciphertextHex, domainHex } ready to pass to aceDecrypt().
      */
-    async readEncryptedBlob(blobId: string): Promise<{
+    async readEncryptedBlob(promptId: string): Promise<{
         ciphertextHex: string;
         domainHex: string;
     }> {
-        const { account, blobName } = parseBlobId(blobId);
+        const response = await fetch(
+            `/api/v1/shelby/blob?promptId=${encodeURIComponent(promptId)}`,
+            { cache: "no-store" }
+        );
 
-        const result = await shelbyClient.download({ account, blobName });
-        const text = await new Response(result.readable).text();
+        if (!response.ok) {
+            const body = await response.json().catch(() => null);
+            throw new Error(
+                body && typeof body.error === "string"
+                    ? body.error
+                    : `Shelby read failed with status ${response.status}.`
+            );
+        }
+
+        const text = await response.text();
 
         let parsed: { ciphertextHex: string; domainHex: string };
         try {
