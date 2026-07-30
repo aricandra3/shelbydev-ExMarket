@@ -4,11 +4,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useAppWallet } from "@/components/wallet/walletContext";
-import {
-    hasAccess as checkAccess,
-    getAccessRecord,
-    type AccessRecord,
-} from "@/lib/contracts";
+import { getAccessRecord, type AccessRecord } from "@/lib/contracts";
 
 const NO_ACCESS: AccessRecord = {
     accessType: "none",
@@ -16,6 +12,19 @@ const NO_ACCESS: AccessRecord = {
     expiresAt: 0,
     apiCallsRemaining: 0,
 };
+
+/// Mirrors access_control::has_access over a record we already fetched, instead
+/// of spending a second view call to ask the chain the same question. The
+/// contract still decides at payment time, and ACE workers still call
+/// check_permission on-chain before releasing a key — this only gates the UI.
+function recordGrantsAccess(record: AccessRecord): boolean {
+    if (record.accessType === "perpetual") return true;
+    if (record.accessType === "subscription") {
+        return record.expiresAt === 0 || record.expiresAt * 1000 > Date.now();
+    }
+    if (record.accessType === "api") return record.apiCallsRemaining > 0;
+    return false;
+}
 
 export function useAccessCheck(promptId: string | null) {
     const { account } = useAppWallet();
@@ -40,15 +49,14 @@ export function useAccessCheck(promptId: string | null) {
         setHasAccess(false);
         setRecord(NO_ACCESS);
         try {
-            // One record read now covers both the API quota and the
-            // subscription window, so this is no more expensive than before.
-            const [access, accessRecord] = await Promise.all([
-                checkAccess(accountAddress, promptId, { fresh }),
-                getAccessRecord(accountAddress, promptId, { fresh }),
-            ]);
+            // A single record read answers everything: whether access is live,
+            // when a subscription ends, and how much API quota is left.
+            const accessRecord = await getAccessRecord(accountAddress, promptId, {
+                fresh,
+            });
 
             if (requestId !== requestIdRef.current) return;
-            setHasAccess(access);
+            setHasAccess(recordGrantsAccess(accessRecord));
             setRecord(accessRecord);
         } catch (error) {
             if (requestId !== requestIdRef.current) return;

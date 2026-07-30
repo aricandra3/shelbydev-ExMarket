@@ -72,7 +72,12 @@ async function runLimitedView<T>(task: () => Promise<T>): Promise<T> {
     }
 }
 
-async function retryView<T>(task: () => Promise<T>, retries = 2): Promise<T> {
+/// Retries exist only for rate-limit errors, and the Aptos key's limit is a
+/// 200-request budget over a 5-minute window — not a short burst limit. Retrying
+/// inside that window cannot succeed and spends the budget three times over,
+/// which is how a single busy page turned into a wall of 429s. Fail fast and let
+/// callers serve cached or stale data instead.
+async function retryView<T>(task: () => Promise<T>, retries = 0): Promise<T> {
     for (let attempt = 0; attempt <= retries; attempt += 1) {
         try {
             return await task();

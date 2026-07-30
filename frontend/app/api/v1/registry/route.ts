@@ -178,6 +178,74 @@ async function fetchModuleTransactionVersions(): Promise<Array<number | string>>
     return versions;
 }
 
+/// Which of these versions are actually listing transactions.
+///
+/// account_transactions gives every transaction that touched the module —
+/// publishes, unlocks, deactivations, admin calls. Fetching each one over REST
+/// to find out costs a request apiece, and the Aptos API key allows only 200
+/// requests per 5 minutes. One indexer query keyed by version (its primary key)
+/// answers it instead, cutting the REST fan-out by roughly 4x on this
+/// deployment: 38 versions → 9 worth fetching.
+async function filterListingVersions(
+    versions: Array<number | string>
+): Promise<Array<number | string>> {
+    if (versions.length === 0) return [];
+
+    const query = `
+        query ListingTransactions($versions: [bigint!]) {
+            user_transactions(where: { version: { _in: $versions } }) {
+                version
+                entry_function_id_str
+            }
+        }
+    `;
+
+    try {
+        const response = await fetchWithRetry(APTOS_INDEXER_URL, {
+            method: "POST",
+            headers: getAptosHeaders(true),
+            cache: "no-store",
+            body: JSON.stringify({
+                query,
+                variables: { versions: versions.map((v) => Number(v)) },
+            }),
+        });
+
+        if (!response.ok) throw new Error(`Aptos indexer HTTP ${response.status}`);
+
+        const payload = (await response.json()) as {
+            data?: {
+                user_transactions?: Array<{
+                    version: number | string;
+                    entry_function_id_str?: string | null;
+                }>;
+            };
+            errors?: Array<{ message?: string }>;
+        };
+        if (payload.errors?.length) {
+            throw new Error(payload.errors[0]?.message ?? "indexer query failed");
+        }
+
+        const rows = payload.data?.user_transactions ?? [];
+        const wanted = new Set([
+            `${MODULES.PROMPT_REGISTRY}::publish_prompt`,
+            `${MODULES.PROMPT_REGISTRY}::register_prompt`,
+            `${MODULES.PROMPT_REGISTRY}::link_blob`,
+        ]);
+
+        return rows
+            .filter((row) => row.entry_function_id_str && wanted.has(row.entry_function_id_str))
+            .map((row) => row.version);
+    } catch (error) {
+        // Better to scan everything than to show an empty marketplace.
+        console.warn(
+            "Could not filter versions by entry function; falling back to fetching all.",
+            error
+        );
+        return versions;
+    }
+}
+
 async function fetchTransactionByVersion(
     version: number | string
 ): Promise<AptosTransaction> {
@@ -304,33 +372,71 @@ async function fetchModuleAccountTransactions(): Promise<AptosTransaction[]> {
     return (await txResp.json()) as AptosTransaction[];
 }
 
+/// Transactions already scanned, so a refresh only pays for what is new.
+///
+/// The Aptos API key allows 200 requests per 5 minutes, and every unscanned
+/// version costs one. Re-reading the same history on each refresh is what
+/// exhausted that budget; in steady state this now costs two indexer queries
+/// and no REST calls at all.
+let scanState: {
+    highestVersion: number;
+    transactions: AptosTransaction[];
+} = { highestVersion: 0, transactions: [] };
+
 async function fetchRegistryTransactions(): Promise<AptosTransaction[]> {
     try {
         const versions = await fetchModuleTransactionVersions();
-        if (versions.length === 0) return fetchModuleAccountTransactions();
+        if (versions.length === 0) {
+            return scanState.transactions.length > 0
+                ? scanState.transactions
+                : fetchModuleAccountTransactions();
+        }
 
-        const indexerTransactions = await mapWithConcurrency(
-            versions,
-            TRANSACTION_FETCH_CONCURRENCY,
-            fetchTransactionByVersion
+        const freshVersions = versions.filter(
+            (version) => Number(version) > scanState.highestVersion
         );
-        const moduleTransactions = await fetchModuleAccountTransactions().catch(
-            () => []
-        );
-        const seenVersions = new Set<string>();
 
-        return [...indexerTransactions, ...moduleTransactions].filter((tx) => {
-            const version = tx.version?.toString();
-            if (!version) return true;
-            if (seenVersions.has(version)) return false;
-            seenVersions.add(version);
-            return true;
-        });
+        if (freshVersions.length === 0) {
+            console.info(
+                `Registry scan: ${versions.length} module tx(s), none new — reusing ${scanState.transactions.length} scanned tx(s), 0 REST calls.`
+            );
+            return scanState.transactions;
+        }
+
+        const listingVersions = await filterListingVersions(freshVersions);
+        const fetched =
+            listingVersions.length > 0
+                ? await mapWithConcurrency(
+                      listingVersions,
+                      TRANSACTION_FETCH_CONCURRENCY,
+                      fetchTransactionByVersion
+                  )
+                : [];
+
+        const highestSeen = versions.reduce<number>(
+            (max, version) => Math.max(max, Number(version)),
+            scanState.highestVersion
+        );
+
+        console.info(
+            `Registry scan: ${versions.length} module tx(s), ${freshVersions.length} new, ` +
+                `${listingVersions.length} fetched over REST.`
+        );
+
+        scanState = {
+            highestVersion: highestSeen,
+            transactions: [...fetched, ...scanState.transactions],
+        };
+
+        return scanState.transactions;
     } catch (error) {
         console.warn(
-            "Aptos indexer registry discovery failed; falling back to module account scan.",
+            "Aptos indexer registry discovery failed; falling back to what was already scanned.",
             error
         );
+
+        // Anything already scanned beats an empty marketplace, and costs nothing.
+        if (scanState.transactions.length > 0) return scanState.transactions;
         return fetchModuleAccountTransactions();
     }
 }
