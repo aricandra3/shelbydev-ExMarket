@@ -244,6 +244,40 @@ module exmarket::payment_tests {
         assert!(!access_control::has_access(signer::address_of(buyer), prompt_id), 4);
     }
 
+    // A subscriber can read when their window closes, not just whether it is
+    // open — the dashboard and prompt page both need the date.
+    #[test(framework = @aptos_framework, exmarket = @exmarket, creator = @0xC, buyer = @0xB)]
+    fun test_access_record_exposes_expiry(
+        framework: &signer,
+        exmarket: &signer,
+        creator: &signer,
+        buyer: &signer,
+    ) {
+        setup(framework, exmarket, buyer);
+        account::create_account_for_test(signer::address_of(creator));
+        let buyer_addr = signer::address_of(buyer);
+
+        let prompt_id = list_live_prompt(
+            creator,
+            prompt_registry::pricing_subscription(),
+            PRICE,
+            DAY_SECS,
+        );
+
+        // No record yet
+        let (kind, _, expires, calls) =
+            access_control::get_access_record(buyer_addr, prompt_id);
+        assert!(kind == 0 && expires == 0 && calls == 0, 1);
+
+        payment::subscribe_prompt(buyer, prompt_id, 2);
+
+        let (kind2, granted, expires2, calls2) =
+            access_control::get_access_record(buyer_addr, prompt_id);
+        assert!(kind2 == access_control::access_type_subscription(), 2);
+        assert!(expires2 == granted + (DAY_SECS * 2), 3);
+        assert!(calls2 == 0, 4);
+    }
+
     // Renewing before expiry extends the existing window instead of
     // discarding the time already paid for.
     #[test(framework = @aptos_framework, exmarket = @exmarket, creator = @0xC, buyer = @0xB)]

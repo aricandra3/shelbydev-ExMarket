@@ -118,6 +118,41 @@ module exmarket::access_control {
         0
     }
 
+    // The user's raw access record for a prompt, as
+    // (access_type, granted_at, expires_at, api_calls_remaining).
+    //
+    // has_access answers yes/no; a subscriber also needs to see *when* their
+    // window closes, and there was no way to read that off-chain.
+    // Returns all zeros when the user has no record for this prompt.
+    #[view]
+    public fun get_access_record(
+        user: address,
+        prompt_id: address,
+    ): (u8, u64, u64, u64) acquires UserAccessList {
+        if (!exists<UserAccessList>(user)) {
+            return (0, 0, 0, 0)
+        };
+
+        let list = borrow_global<UserAccessList>(user);
+        let len = vector::length(&list.records);
+        let i = 0;
+
+        while (i < len) {
+            let record = vector::borrow(&list.records, i);
+            if (record.prompt_id == prompt_id) {
+                return (
+                    record.access_type,
+                    record.granted_at,
+                    record.expires_at,
+                    record.api_calls_remaining,
+                )
+            };
+            i = i + 1;
+        };
+
+        (0, 0, 0, 0)
+    }
+
     // Get all prompts a user has access to
     #[view]
     public fun get_user_unlocked_prompts(user: address): vector<address> acquires UserAccessList {

@@ -4,13 +4,24 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useAppWallet } from "@/components/wallet/walletContext";
-import { hasAccess as checkAccess, getApiCallsRemaining } from "@/lib/contracts";
+import {
+    hasAccess as checkAccess,
+    getAccessRecord,
+    type AccessRecord,
+} from "@/lib/contracts";
+
+const NO_ACCESS: AccessRecord = {
+    accessType: "none",
+    grantedAt: 0,
+    expiresAt: 0,
+    apiCallsRemaining: 0,
+};
 
 export function useAccessCheck(promptId: string | null) {
     const { account } = useAppWallet();
     const accountAddress = account?.address?.toString();
     const [hasAccessResult, setHasAccess] = useState(false);
-    const [apiCallsRemaining, setApiCallsRemaining] = useState(0);
+    const [record, setRecord] = useState<AccessRecord>(NO_ACCESS);
     const [loading, setLoading] = useState(false);
     const requestIdRef = useRef(0);
 
@@ -20,28 +31,30 @@ export function useAccessCheck(promptId: string | null) {
 
         if (!accountAddress || !promptId) {
             setHasAccess(false);
-            setApiCallsRemaining(0);
+            setRecord(NO_ACCESS);
             setLoading(false);
             return;
         }
 
         setLoading(true);
         setHasAccess(false);
-        setApiCallsRemaining(0);
+        setRecord(NO_ACCESS);
         try {
-            const [access, calls] = await Promise.all([
+            // One record read now covers both the API quota and the
+            // subscription window, so this is no more expensive than before.
+            const [access, accessRecord] = await Promise.all([
                 checkAccess(accountAddress, promptId, { fresh }),
-                getApiCallsRemaining(accountAddress, promptId, { fresh }),
+                getAccessRecord(accountAddress, promptId, { fresh }),
             ]);
 
             if (requestId !== requestIdRef.current) return;
             setHasAccess(access);
-            setApiCallsRemaining(calls);
+            setRecord(accessRecord);
         } catch (error) {
             if (requestId !== requestIdRef.current) return;
             console.error("Access check failed:", error);
             setHasAccess(false);
-            setApiCallsRemaining(0);
+            setRecord(NO_ACCESS);
         } finally {
             if (requestId === requestIdRef.current) setLoading(false);
         }
@@ -53,7 +66,10 @@ export function useAccessCheck(promptId: string | null) {
 
     return {
         hasAccess: hasAccessResult,
-        apiCallsRemaining,
+        record,
+        apiCallsRemaining: record.apiCallsRemaining,
+        /** Unix seconds; 0 for perpetual or no access. */
+        expiresAt: record.expiresAt,
         loading,
         refresh,
     };

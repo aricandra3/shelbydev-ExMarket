@@ -145,6 +145,44 @@ export async function getApiCallsRemaining(
     return Number(result[0]);
 }
 
+export type AccessRecord = {
+    accessType: "none" | "perpetual" | "subscription" | "api";
+    grantedAt: number;
+    /** Unix seconds. 0 means no expiry. */
+    expiresAt: number;
+    apiCallsRemaining: number;
+};
+
+const ACCESS_TYPES: Record<number, AccessRecord["accessType"]> = {
+    0: "none",
+    1: "perpetual",
+    2: "subscription",
+    3: "api",
+};
+
+/// The buyer's raw access record — what kind of access, and when it ends.
+/// hasAccess() only answers yes/no, which is not enough to tell a subscriber
+/// how long they have left.
+export async function getAccessRecord(
+    userAddr: string,
+    promptId: string,
+    options: { fresh?: boolean } = {}
+): Promise<AccessRecord> {
+    const result = await viewFunction<any[]>(
+        `${MODULES.ACCESS_CONTROL}::get_access_record`,
+        [userAddr, promptId],
+        [],
+        { cache: !options.fresh }
+    );
+
+    return {
+        accessType: ACCESS_TYPES[Number(result[0])] ?? "none",
+        grantedAt: Number(result[1]),
+        expiresAt: Number(result[2]),
+        apiCallsRemaining: Number(result[3]),
+    };
+}
+
 export async function getUserUnlockedPrompts(
     userAddr: string,
     options: { fresh?: boolean } = {}

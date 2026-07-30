@@ -24,6 +24,7 @@ const ALLOWED_VIEW_FUNCTIONS = new Set([
     `${MODULES.REVENUE_SPLIT}::get_total_fees_collected`,
     `${MODULES.ACCESS_CONTROL}::has_access`,
     `${MODULES.ACCESS_CONTROL}::get_api_calls_remaining`,
+    `${MODULES.ACCESS_CONTROL}::get_access_record`,
     `${MODULES.ACCESS_CONTROL}::get_user_unlocked_prompts`,
     `${MODULES.UNLOCK_HISTORY}::get_unlock_count`,
     `${MODULES.UNLOCK_HISTORY}::get_total_spent`,
