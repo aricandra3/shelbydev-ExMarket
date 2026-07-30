@@ -21,6 +21,8 @@ export async function getPromptMetadataServer(
         3: "api-pay-per-call",
     };
 
+    const blobLinked = Boolean(result[12]);
+
     return {
         promptId,
         creator: result[0] as string,
@@ -30,13 +32,29 @@ export async function getPromptMetadataServer(
         category: result[4] as string,
         pricingModel: pricingMap[result[5] as number] || "pay-per-unlock",
         price: Number(result[6]),
-        status: (result[7] as number) === 1 ? "active" : "inactive",
+        status: (result[7] as number) === 1 && blobLinked ? "active" : "inactive",
         totalUnlocks: Number(result[8]),
         totalRevenue: Number(result[9]),
+        subscriptionPeriodSecs: Number(result[10] ?? 0),
+        contentHash: typeof result[11] === "string" ? result[11] : "",
+        blobLinked,
         tags: [],
         createdAt: 0,
         updatedAt: 0,
     };
+}
+
+export async function getApiCallsRemainingServer(
+    userAddr: string,
+    promptId: string
+): Promise<number> {
+    const result = await viewFunctionServer<[string | number]>(
+        `${MODULES.ACCESS_CONTROL}::get_api_calls_remaining`,
+        [userAddr, promptId],
+        [],
+        { cache: false }
+    );
+    return Number(result[0]);
 }
 
 export async function getPromptBlobIdServer(promptId: string): Promise<string> {

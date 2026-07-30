@@ -58,6 +58,60 @@ function parseBlobId(blobId: string) {
     return { account, blobName };
 }
 
+/// Signs the proof the upload endpoint requires. The wallet returns the exact
+/// string it signed (`fullMessage`, usually wrapped in its own preamble), so we
+/// forward that rather than what we asked for.
+export type UploadSigner = (message: string) => Promise<{
+    fullMessage: string;
+    signature: string;
+    publicKey: string;
+}>;
+
+const UPLOAD_PROOF_ACTION = "ExMarket Shelby upload";
+
+function randomNonce() {
+    const bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    return Array.from(bytes)
+        .map((byte) => byte.toString(16).padStart(2, "0"))
+        .join("");
+}
+
+export async function createUploadProof(
+    sign: UploadSigner,
+    account: string,
+    blobName: string
+): Promise<Record<string, string>> {
+    const timestamp = String(Date.now());
+    const nonce = randomNonce();
+    const message = [
+        UPLOAD_PROOF_ACTION,
+        `Account: ${account}`,
+        `Blob: ${blobName}`,
+        `Timestamp: ${timestamp}`,
+        `Nonce: ${nonce}`,
+    ].join("\n");
+
+    const signed = await sign(message);
+
+    // The signed message is multi-line; HTTP header values cannot hold newlines,
+    // so it travels base64-encoded and the server verifies the decoded bytes.
+    const messageBytes = new TextEncoder().encode(signed.fullMessage);
+    let binary = "";
+    messageBytes.forEach((byte) => {
+        binary += String.fromCharCode(byte);
+    });
+    const encodedMessage = btoa(binary);
+
+    return {
+        "X-Wallet-Public-Key": signed.publicKey,
+        "X-Wallet-Signature": signed.signature,
+        "X-Wallet-Message": encodedMessage,
+        "X-Wallet-Timestamp": timestamp,
+        "X-Wallet-Nonce": nonce,
+    };
+}
+
 async function fetchWithTimeout(init: RequestInit, timeoutMs: number, label: string) {
     const controller = new AbortController();
     const timeout = globalThis.setTimeout(() => controller.abort(), timeoutMs);
@@ -143,12 +197,13 @@ export const shelbyService = {
         ciphertextHex: string,
         domainHex: string,
         address: string,
-        blobName: string
+        blobName: string,
+        proofHeaders: Record<string, string>
     ): Promise<{ uploadId: string }> {
         const response = await fetchWithTimeout(
             {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: { "Content-Type": "application/json", ...proofHeaders },
                 body: JSON.stringify({
                     phase: "start",
                     account: address,
@@ -182,12 +237,13 @@ export const shelbyService = {
     async finalizeUpload(
         uploadId: string,
         address: string,
-        blobName: string
+        blobName: string,
+        proofHeaders: Record<string, string>
     ): Promise<void> {
         const response = await fetchWithTimeout(
             {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: { "Content-Type": "application/json", ...proofHeaders },
                 body: JSON.stringify({
                     phase: "complete",
                     uploadId,

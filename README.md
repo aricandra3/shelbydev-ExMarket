@@ -45,6 +45,45 @@ Run the test suite:
 cd contracts && aptos move test --named-addresses exmarket=default
 ```
 
+## Programmatic access (`GET /api/v1/prompt/:id`)
+
+Paid access for agents and backends. Every call proves wallet ownership; no
+session, no API key of ours.
+
+| Header | Value |
+|---|---|
+| `X-Wallet-Address` | buyer's address |
+| `X-Wallet-Public-Key` | Ed25519 public key (must derive to that address) |
+| `X-Wallet-Signature` | signature over the message below |
+| `X-Wallet-Message` | **base64** of the exact signed message (it is multi-line, so it cannot travel raw in a header) |
+| `X-Wallet-Timestamp` | unix ms, valid for 5 minutes |
+| `X-Wallet-Nonce` | 16–128 chars, single use |
+| `X-Consume-Tx` | api-pay-per-call listings only: hash of a fresh `access_control::consume_api_call` |
+
+Message to sign:
+
+```
+ExMarket API prompt access
+Prompt: <prompt_id>
+Wallet: <wallet_address>
+Timestamp: <unix_ms>
+Nonce: <random>
+```
+
+Any rejection returns `required_message` showing exactly what to sign. Responses:
+
+- `200` — `ciphertext_hex`, `domain_hex`, `content_hash`, and `calls_remaining`
+  for metered listings. The payload is ACE-encrypted: decrypt client-side with
+  the buyer's wallet, then check it against `content_hash`. The server cannot
+  decrypt it, which is the point.
+- `402` — no access yet, or a per-call listing missing/reusing its consume tx
+- `409` — listing deactivated, or content not stored yet
+- `401` — proof missing, stale, replayed, or bound to another prompt
+
+Per-call billing is the caller's own `consume_api_call` transaction rather than
+a platform-side counter: `consume_api_call` takes the user's signer, so no
+server key can spend someone's quota. One transaction per served response.
+
 ## Quick Start
 
 ### 1. Deploy Contracts

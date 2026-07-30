@@ -4,6 +4,33 @@
 import { NextRequest, NextResponse } from "next/server";
 import { SHELBY_RPC_URL } from "@/lib/constants";
 import { checkRateLimit, rateLimitHeaders } from "@/lib/apiSecurity";
+import { verifyWalletProof } from "@/lib/walletProof";
+
+/// Every upload spends our Shelby storage quota under the caller's account, so
+/// the caller has to prove they own that account. Without this, anyone who
+/// knows the endpoint can write blobs on our key.
+const UPLOAD_PROOF_ACTION = "ExMarket Shelby upload";
+
+function requireUploadProof(
+    req: NextRequest,
+    account: string,
+    blobName: string,
+    phase: UploadPhase
+) {
+    return verifyWalletProof({
+        headers: req.headers,
+        walletAddress: account,
+        action: UPLOAD_PROOF_ACTION,
+        bindings: [
+            ["Account", account],
+            ["Blob", blobName],
+        ],
+        // One signature covers the whole upload session. The scope is
+        // per-phase so the single nonce can be spent once by "start" and once
+        // by "complete", without letting either phase be replayed.
+        scope: `shelby-upload:${phase}`,
+    });
+}
 
 export const dynamic = "force-dynamic";
 
@@ -168,6 +195,7 @@ function logCompleteTimings(t: UploadTimings, uploadId: string, ok: boolean) {
 
 /// Finalize an upload started by a previous "start" call.
 async function handleComplete(
+    req: NextRequest,
     body: ShelbyUploadBody,
     rateLimit: Parameters<typeof rateLimitHeaders>[0]
 ) {
@@ -178,6 +206,26 @@ async function handleComplete(
         return NextResponse.json(
             { error: "Invalid Shelby upload id." },
             { status: 400, headers: rateLimitHeaders(rateLimit) }
+        );
+    }
+
+    if (
+        typeof body.account !== "string" ||
+        !/^0x[a-fA-F0-9]{1,64}$/.test(body.account) ||
+        typeof body.blobName !== "string" ||
+        !body.blobName.trim()
+    ) {
+        return NextResponse.json(
+            { error: "Invalid Shelby finalize request." },
+            { status: 400, headers: rateLimitHeaders(rateLimit) }
+        );
+    }
+
+    const proof = requireUploadProof(req, body.account, body.blobName, "complete");
+    if (!proof.ok) {
+        return NextResponse.json(
+            { error: proof.error, required_message: proof.requiredMessage },
+            { status: 401, headers: rateLimitHeaders(rateLimit) }
         );
     }
 
@@ -371,7 +419,7 @@ export async function POST(req: NextRequest) {
     const phase: UploadPhase = body.phase === "complete" ? "complete" : "start";
 
     if (phase === "complete") {
-        return handleComplete(body, rateLimit);
+        return handleComplete(req, body, rateLimit);
     }
 
     const validationError = validateUploadBody(body);
@@ -384,6 +432,15 @@ export async function POST(req: NextRequest) {
 
     const account = body.account as string;
     const blobName = body.blobName as string;
+
+    const proof = requireUploadProof(req, account, blobName, "start");
+    if (!proof.ok) {
+        return NextResponse.json(
+            { error: proof.error, required_message: proof.requiredMessage },
+            { status: 401, headers: rateLimitHeaders(rateLimit) }
+        );
+    }
+
     const payloadBytes = new TextEncoder().encode(
         JSON.stringify({
             ciphertextHex: body.ciphertextHex,

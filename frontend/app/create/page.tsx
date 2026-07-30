@@ -110,7 +110,7 @@ const PUBLISH_STEP_LABELS: Record<PublishStep, string> = {
 
 export default function CreatePage() {
     const router = useRouter();
-    const { account, connected, signAndSubmitTransaction } = useAppWallet();
+    const { account, connected, signAndSubmitTransaction, signMessage } = useAppWallet();
     const accountAddress = account?.address?.toString();
 
     const [form, setForm] = useState({
@@ -162,9 +162,33 @@ export default function CreatePage() {
             throw new Error("Reconnect the same wallet to finish this publish.");
         }
 
-        const { shelbyService } = await import("@/lib/shelby");
+        const { shelbyService, createUploadProof } = await import("@/lib/shelby");
 
         setStep("uploading-blob");
+        setStatusDetail("Signing the Shelby upload proof...");
+
+        // The upload endpoint spends our Shelby quota under this wallet's
+        // account, so it requires proof the wallet owns it. One signature
+        // covers both upload phases.
+        const proofHeaders = await createUploadProof(
+            async (message) => {
+                const signed = await signMessage({ message, nonce: "" });
+                const rawSig = signed?.signature;
+                const rawPk = account?.publicKey;
+                if (!rawSig || !rawPk) {
+                    throw new Error("Wallet did not return a usable signature.");
+                }
+
+                return {
+                    fullMessage: signed.fullMessage ?? message,
+                    signature: typeof rawSig === "string" ? rawSig : rawSig.toString(),
+                    publicKey: typeof rawPk === "string" ? rawPk : rawPk.toString(),
+                };
+            },
+            publish.accountAddress,
+            publish.blobName
+        );
+
         setStatusDetail("Uploading encrypted content to Shelby RPC...");
 
         // Transfer the bytes first (~2.3s). Finalizing is the slow part, and it
@@ -180,11 +204,17 @@ export default function CreatePage() {
                 publish.ciphertextHex,
                 publish.domainHex,
                 publish.accountAddress,
-                publish.blobName
+                publish.blobName,
+                proofHeaders
             );
 
             finalizing = shelbyService
-                .finalizeUpload(uploadId, publish.accountAddress, publish.blobName)
+                .finalizeUpload(
+                    uploadId,
+                    publish.accountAddress,
+                    publish.blobName,
+                    proofHeaders
+                )
                 .then(() => ({ ok: true as const }))
                 .catch((err: unknown) => ({ ok: false as const, err }));
         } catch (err: unknown) {
