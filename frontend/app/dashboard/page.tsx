@@ -2,20 +2,29 @@
 
 "use client";
 
+import { useMemo } from "react";
 import Link from "next/link";
 import { useAppWallet } from "@/components/wallet/walletContext";
 import { useCreatorDashboard } from "@/hooks/useCreatorDashboard";
+import { STORAGE_WARNING_DAYS, useBlobStorage } from "@/hooks/useBlobStorage";
 import { formatApt } from "@/lib/constants";
 import { truncateAddress } from "@/lib/utils";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Plus, WalletCards } from "lucide-react";
+import { HardDrive, Plus, TriangleAlert, WalletCards } from "lucide-react";
 
 export default function DashboardPage() {
     const { account, connected } = useAppWallet();
     const { prompts, totalRevenue, loading, error, refresh } = useCreatorDashboard();
+    const promptIds = useMemo(() => prompts.map((p) => p.promptId), [prompts]);
+    const { statuses, extendStorage, extendingId, extendError } =
+        useBlobStorage(promptIds);
+    const expiringSoon = prompts.filter((p) => {
+        const days = statuses[p.promptId]?.daysRemaining;
+        return typeof days === "number" && days <= STORAGE_WARNING_DAYS;
+    });
 
     if (!connected) {
         return (
@@ -63,6 +72,26 @@ export default function DashboardPage() {
                     <Button onClick={refresh} size="sm" variant="outline">
                         Retry
                     </Button>
+                </Alert>
+            )}
+
+            {expiringSoon.length > 0 && (
+                <Alert className="mb-6 border-accent-red/70 bg-accent-red/10 p-5">
+                    <AlertTitle>
+                        {expiringSoon.length} listing
+                        {expiringSoon.length === 1 ? "" : "s"} run out of Shelby storage soon
+                    </AlertTitle>
+                    <AlertDescription>
+                        Buyers hold perpetual access, but content stops being readable once
+                        its storage window closes. Extend it below before that happens.
+                    </AlertDescription>
+                </Alert>
+            )}
+
+            {extendError && (
+                <Alert className="mb-6 p-5">
+                    <AlertTitle>Could not extend storage</AlertTitle>
+                    <AlertDescription>{extendError}</AlertDescription>
                 </Alert>
             )}
 
@@ -129,39 +158,93 @@ export default function DashboardPage() {
                     </div>
                 ) : (
                     <div className="divide-y divide-cream/10 animate-fade-in">
-                        {prompts.map((prompt, i) => (
-                            <div key={prompt.promptId}>
-                                <Link
-                                    href={`/prompt/${prompt.promptId}`}
-                                    className="flex items-center justify-between px-6 py-4 transition-colors hover:bg-cream/[0.06]"
-                                >
-                                    <div className="flex-1 min-w-0">
-                                        <div className="flex items-center gap-2">
-                                            <h3 className="truncate text-sm font-black text-cream">
-                                                {prompt.title}
-                                            </h3>
-                                            <Badge
-                                                variant={prompt.status === "active" ? "success" : "outline"}
-                                                className="text-[10px]"
+                        {prompts.map((prompt) => {
+                            const storage = statuses[prompt.promptId];
+                            const days = storage?.daysRemaining;
+                            const expiring =
+                                typeof days === "number" && days <= STORAGE_WARNING_DAYS;
+
+                            return (
+                                <div key={prompt.promptId}>
+                                    <Link
+                                        href={`/prompt/${prompt.promptId}`}
+                                        className="flex items-center justify-between px-6 py-4 transition-colors hover:bg-cream/[0.06]"
+                                    >
+                                        <div className="flex-1 min-w-0">
+                                            <div className="flex items-center gap-2">
+                                                <h3 className="truncate text-sm font-black text-cream">
+                                                    {prompt.title}
+                                                </h3>
+                                                <Badge
+                                                    variant={prompt.status === "active" ? "success" : "outline"}
+                                                    className="text-[10px]"
+                                                >
+                                                    {prompt.status}
+                                                </Badge>
+                                            </div>
+                                            <div className="mt-1 text-xs font-semibold text-cream/40">
+                                                {prompt.category} • {prompt.pricingModel.replace(/-/g, " ")}
+                                            </div>
+                                        </div>
+                                        <div className="text-right shrink-0 ml-4">
+                                            <div className="text-sm font-black text-accent-green">
+                                                {formatApt(prompt.totalRevenue)}
+                                            </div>
+                                            <div className="text-xs font-semibold text-cream/35">
+                                                {prompt.totalUnlocks} unlocks
+                                            </div>
+                                        </div>
+                                    </Link>
+
+                                    {/* Shelby storage lifetime. Access is sold as
+                                        perpetual, so this date is the real limit. */}
+                                    <div className="flex flex-wrap items-center justify-between gap-3 px-6 pb-4">
+                                        <div
+                                            className={`flex items-center gap-2 text-xs font-semibold ${
+                                                expiring ? "text-accent-red" : "text-cream/40"
+                                            }`}
+                                        >
+                                            {expiring ? (
+                                                <TriangleAlert className="h-3.5 w-3.5 shrink-0" />
+                                            ) : (
+                                                <HardDrive className="h-3.5 w-3.5 shrink-0" />
+                                            )}
+                                            {storage?.ok && typeof days === "number" ? (
+                                                <span>
+                                                    Shelby storage paid for {days} more day
+                                                    {days === 1 ? "" : "s"}
+                                                    {storage.sizeBytes
+                                                        ? ` • ${storage.sizeBytes} B`
+                                                        : ""}
+                                                    {storage.isWritten === false
+                                                        ? " • upload not finalized"
+                                                        : ""}
+                                                </span>
+                                            ) : storage && !storage.ok ? (
+                                                <span>{storage.error}</span>
+                                            ) : (
+                                                <span className="text-cream/25">
+                                                    Reading storage status...
+                                                </span>
+                                            )}
+                                        </div>
+
+                                        {storage?.ok && (
+                                            <Button
+                                                onClick={() => extendStorage(prompt.promptId)}
+                                                disabled={extendingId === prompt.promptId}
+                                                size="sm"
+                                                variant={expiring ? "default" : "outline"}
                                             >
-                                                {prompt.status}
-                                            </Badge>
-                                        </div>
-                                        <div className="mt-1 text-xs font-semibold text-cream/40">
-                                            {prompt.category} • {prompt.pricingModel.replace(/-/g, " ")}
-                                        </div>
+                                                {extendingId === prompt.promptId
+                                                    ? "Extending..."
+                                                    : "Extend 1 year"}
+                                            </Button>
+                                        )}
                                     </div>
-                                    <div className="text-right shrink-0 ml-4">
-                                        <div className="text-sm font-black text-accent-green">
-                                            {formatApt(prompt.totalRevenue)}
-                                        </div>
-                                        <div className="text-xs font-semibold text-cream/35">
-                                            {prompt.totalUnlocks} unlocks
-                                        </div>
-                                    </div>
-                                </Link>
-                            </div>
-                        ))}
+                                </div>
+                            );
+                        })}
                     </div>
                 )}
             </Card>

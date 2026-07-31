@@ -118,6 +118,41 @@ module exmarket::access_control {
         0
     }
 
+    // The user's raw access record for a prompt, as
+    // (access_type, granted_at, expires_at, api_calls_remaining).
+    //
+    // has_access answers yes/no; a subscriber also needs to see *when* their
+    // window closes, and there was no way to read that off-chain.
+    // Returns all zeros when the user has no record for this prompt.
+    #[view]
+    public fun get_access_record(
+        user: address,
+        prompt_id: address,
+    ): (u8, u64, u64, u64) acquires UserAccessList {
+        if (!exists<UserAccessList>(user)) {
+            return (0, 0, 0, 0)
+        };
+
+        let list = borrow_global<UserAccessList>(user);
+        let len = vector::length(&list.records);
+        let i = 0;
+
+        while (i < len) {
+            let record = vector::borrow(&list.records, i);
+            if (record.prompt_id == prompt_id) {
+                return (
+                    record.access_type,
+                    record.granted_at,
+                    record.expires_at,
+                    record.api_calls_remaining,
+                )
+            };
+            i = i + 1;
+        };
+
+        (0, 0, 0, 0)
+    }
+
     // Get all prompts a user has access to
     #[view]
     public fun get_user_unlocked_prompts(user: address): vector<address> acquires UserAccessList {
@@ -139,10 +174,18 @@ module exmarket::access_control {
         result
     }
 
-    // ── Friend Functions ────────────────────────────
+    // ── Internal ────────────────────────────────────
 
-    /// Grant access after successful payment (called by payment module)
-    public(friend) fun grant_access(
+    /// Write the access record for a user who already has a UserAccessList.
+    /// Private on purpose: every caller must come through
+    /// `grant_access_with_signer`, which is the only path that can create the
+    /// list in the first place.
+    ///
+    /// Repeat purchases are additive rather than destructive:
+    ///   - API   → remaining calls accumulate
+    ///   - SUB   → renewing before expiry extends the existing window
+    ///   - PERP  → record is replaced (idempotent)
+    fun grant_access(
         user: address,
         prompt_id: address,
         access_type: u8,
@@ -150,24 +193,9 @@ module exmarket::access_control {
         api_calls: u64,
     ) acquires UserAccessList {
         let now = timestamp::now_seconds();
+        assert!(exists<UserAccessList>(user), E_RECORD_NOT_FOUND);
+
         let expires_at = if (duration_secs == 0) { 0 } else { now + duration_secs };
-
-        let record = AccessRecord {
-            prompt_id,
-            access_type,
-            granted_at: now,
-            expires_at,
-            api_calls_remaining: api_calls,
-        };
-
-        // Ensure UserAccessList exists
-        if (!exists<UserAccessList>(user)) {
-            // We can't move_to without a signer for the user.
-            // This is handled by the payment module passing the signer.
-            // For friend modules, we use a different pattern — see grant_access_with_signer
-            abort E_RECORD_NOT_FOUND
-        };
-
         let list = borrow_global_mut<UserAccessList>(user);
 
         // Check for existing record and update or add
@@ -178,13 +206,31 @@ module exmarket::access_control {
         while (i < len) {
             let existing = vector::borrow_mut(&mut list.records, i);
             if (existing.prompt_id == prompt_id) {
-                // Update existing record
                 if (access_type == ACCESS_API) {
-                    // Add calls to existing
-                    existing.api_calls_remaining = existing.api_calls_remaining + api_calls;
+                    // Top up the quota instead of resetting it
+                    existing.api_calls_remaining =
+                        existing.api_calls_remaining + api_calls;
+                    existing.access_type = ACCESS_API;
+                    existing.granted_at = now;
+                } else if (access_type == ACCESS_SUBSCRIPTION) {
+                    // Renewing early must not throw away time already paid for
+                    let base = if (
+                        existing.access_type == ACCESS_SUBSCRIPTION
+                            && existing.expires_at > now
+                    ) {
+                        existing.expires_at
+                    } else {
+                        now
+                    };
+                    expires_at = if (duration_secs == 0) { 0 } else { base + duration_secs };
+                    existing.access_type = ACCESS_SUBSCRIPTION;
+                    existing.granted_at = now;
+                    existing.expires_at = expires_at;
                 } else {
-                    // Replace record
-                    *existing = record;
+                    existing.access_type = access_type;
+                    existing.granted_at = now;
+                    existing.expires_at = expires_at;
+                    existing.api_calls_remaining = api_calls;
                 };
                 found = true;
                 break
@@ -193,7 +239,13 @@ module exmarket::access_control {
         };
 
         if (!found) {
-            vector::push_back(&mut list.records, record);
+            vector::push_back(&mut list.records, AccessRecord {
+                prompt_id,
+                access_type,
+                granted_at: now,
+                expires_at,
+                api_calls_remaining: api_calls,
+            });
         };
 
         event::emit(AccessGranted {
@@ -205,6 +257,8 @@ module exmarket::access_control {
             timestamp: now,
         });
     }
+
+    // ── Friend Functions ────────────────────────────
 
     /// Grant access with signer (creates UserAccessList if needed)
     public(friend) fun grant_access_with_signer(

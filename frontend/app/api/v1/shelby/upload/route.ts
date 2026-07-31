@@ -4,6 +4,33 @@
 import { NextRequest, NextResponse } from "next/server";
 import { SHELBY_RPC_URL } from "@/lib/constants";
 import { checkRateLimit, rateLimitHeaders } from "@/lib/apiSecurity";
+import { verifyWalletProof } from "@/lib/walletProof";
+
+/// Every upload spends our Shelby storage quota under the caller's account, so
+/// the caller has to prove they own that account. Without this, anyone who
+/// knows the endpoint can write blobs on our key.
+const UPLOAD_PROOF_ACTION = "ExMarket Shelby upload";
+
+function requireUploadProof(
+    req: NextRequest,
+    account: string,
+    blobName: string,
+    phase: UploadPhase
+) {
+    return verifyWalletProof({
+        headers: req.headers,
+        walletAddress: account,
+        action: UPLOAD_PROOF_ACTION,
+        bindings: [
+            ["Account", account],
+            ["Blob", blobName],
+        ],
+        // One signature covers the whole upload session. The scope is
+        // per-phase so the single nonce can be spent once by "start" and once
+        // by "complete", without letting either phase be replayed.
+        scope: `shelby-upload:${phase}`,
+    });
+}
 
 export const dynamic = "force-dynamic";
 
@@ -13,15 +40,66 @@ const SHELBY_PART_TIMEOUT_MS = 30_000;
 const SHELBY_COMPLETE_TIMEOUT_MS = 60_000;
 const MAX_ENCRYPTED_PAYLOAD_BYTES = 2_000_000;
 const MIN_SHELBY_PART_SIZE_BYTES = 1_048_576;
-const SHELBY_START_RETRY_DELAYS_MS = [2_000, 4_000, 8_000, 12_000, 16_000];
+// Retries here exist for the gap between the register_blob transaction landing
+// and Shelby seeing it. In practice the first attempt succeeds (measured: 1
+// attempt, 1.8s), so this ladder only shapes how fast a genuine failure
+// surfaces — the old 2/4/8/12/16 ladder made a permanently unregistered blob
+// take 47s to report. ~15s total is plenty of slack for indexer lag.
+const SHELBY_START_RETRY_DELAYS_MS = [1_000, 2_000, 4_000, 8_000];
 const SHELBY_COMPLETE_RETRY_DELAYS_MS = [2_000, 4_000, 8_000, 12_000, 16_000];
 
+/// Uploading runs in two phases so the caller can start signing the publish
+/// transaction while Shelby is still finalizing:
+///
+///   phase "start"    → begin the multipart upload and PUT the payload. Fast
+///                      (~2.3s measured), and it is what actually transfers the
+///                      bytes. Returns the uploadId.
+///   phase "complete" → ask Shelby to finalize. This is the slow one (~10.6s
+///                      measured for an 869-byte payload) and is server-side
+///                      Shelby work — erasure coding and slice distribution —
+///                      that no client-side tuning affects.
+type UploadPhase = "start" | "complete";
+
 type ShelbyUploadBody = {
+    phase?: unknown;
     account?: unknown;
     blobName?: unknown;
     ciphertextHex?: unknown;
     domainHex?: unknown;
+    uploadId?: unknown;
 };
+
+/// uploadId → the blob it belongs to, so a "complete" call can only finalize an
+/// upload this server actually started.
+///
+/// In-memory, which means it does not survive a cold start or span serverless
+/// instances. That is acceptable here because it is defense-in-depth, not the
+/// primary control: Shelby authorizes the finalize with our API key, and a
+/// caller who guessed an id could only finalize an upload that was going to be
+/// finalized anyway. A durable store (Redis/KV) is the fix if this ever needs
+/// to be authoritative — the same caveat applies to the rate limiter.
+const pendingUploads = new Map<
+    string,
+    { account: string; blobName: string; expiresAt: number }
+>();
+
+const PENDING_UPLOAD_TTL_MS = 10 * 60 * 1000;
+
+function rememberPendingUpload(uploadId: string, account: string, blobName: string) {
+    const now = Date.now();
+
+    if (pendingUploads.size > 500) {
+        Array.from(pendingUploads.entries()).forEach(([id, entry]) => {
+            if (entry.expiresAt <= now) pendingUploads.delete(id);
+        });
+    }
+
+    pendingUploads.set(uploadId, {
+        account,
+        blobName,
+        expiresAt: now + PENDING_UPLOAD_TTL_MS,
+    });
+}
 
 function buildRpcUrl(path: string) {
     const normalizedBase = SHELBY_RPC_URL.endsWith("/")
@@ -90,12 +168,132 @@ function isRecoverableCompleteError(status: number, body: string) {
     );
 }
 
+/// Per-phase timings for one upload, logged on completion. The wall-clock cost
+/// of publishing sits almost entirely in here, so it should never be a guess.
+type UploadTimings = {
+    startMs: number;
+    startAttempts: number;
+    partMs: number;
+    completeMs: number;
+    completeAttempts: number;
+};
+
+function logStartTimings(t: UploadTimings, payloadBytes: number, partSize: number) {
+    console.info(
+        `Shelby upload start: ${t.startMs + t.partMs}ms ` +
+            `(start ${t.startMs}ms/${t.startAttempts} attempt(s), part ${t.partMs}ms) ` +
+            `payload=${payloadBytes}B declaredPartSize=${partSize}B`
+    );
+}
+
+function logCompleteTimings(t: UploadTimings, uploadId: string, ok: boolean) {
+    console.info(
+        `Shelby upload complete: ${t.completeMs}ms/${t.completeAttempts} attempt(s) ` +
+            `uploadId=${uploadId} ok=${ok}`
+    );
+}
+
+/// Finalize an upload started by a previous "start" call.
+async function handleComplete(
+    req: NextRequest,
+    body: ShelbyUploadBody,
+    rateLimit: Parameters<typeof rateLimitHeaders>[0]
+) {
+    if (
+        typeof body.uploadId !== "string" ||
+        !/^[A-Za-z0-9_.:-]{8,128}$/.test(body.uploadId)
+    ) {
+        return NextResponse.json(
+            { error: "Invalid Shelby upload id." },
+            { status: 400, headers: rateLimitHeaders(rateLimit) }
+        );
+    }
+
+    if (
+        typeof body.account !== "string" ||
+        !/^0x[a-fA-F0-9]{1,64}$/.test(body.account) ||
+        typeof body.blobName !== "string" ||
+        !body.blobName.trim()
+    ) {
+        return NextResponse.json(
+            { error: "Invalid Shelby finalize request." },
+            { status: 400, headers: rateLimitHeaders(rateLimit) }
+        );
+    }
+
+    const proof = requireUploadProof(req, body.account, body.blobName, "complete");
+    if (!proof.ok) {
+        return NextResponse.json(
+            { error: proof.error, required_message: proof.requiredMessage },
+            { status: 401, headers: rateLimitHeaders(rateLimit) }
+        );
+    }
+
+    const uploadId = body.uploadId;
+    const pending = pendingUploads.get(uploadId);
+
+    // Missing entries are tolerated (cold start / another instance), but a
+    // mismatch against a known entry is a hard no.
+    if (
+        pending &&
+        (pending.account !== body.account || pending.blobName !== body.blobName)
+    ) {
+        return NextResponse.json(
+            { error: "Shelby upload id does not match this blob." },
+            { status: 403, headers: rateLimitHeaders(rateLimit) }
+        );
+    }
+
+    const timings: UploadTimings = {
+        startMs: 0,
+        startAttempts: 0,
+        partMs: 0,
+        completeMs: 0,
+        completeAttempts: 0,
+    };
+
+    try {
+        const completeStartedAt = Date.now();
+        const { response, errorBody } = await completeMultipartUpload(
+            uploadId,
+            timings
+        );
+        timings.completeMs = Date.now() - completeStartedAt;
+        logCompleteTimings(timings, uploadId, response.ok);
+
+        if (!response.ok) {
+            return NextResponse.json(
+                {
+                    error: `Failed to finalize Shelby upload. uploadId: ${uploadId}, status: ${response.status}, body: ${errorBody}`,
+                },
+                { status: response.status, headers: rateLimitHeaders(rateLimit) }
+            );
+        }
+
+        pendingUploads.delete(uploadId);
+
+        return NextResponse.json(
+            { ok: true, completeMs: timings.completeMs },
+            { headers: rateLimitHeaders(rateLimit) }
+        );
+    } catch (error: unknown) {
+        const message =
+            error instanceof Error ? error.message : "Shelby finalize failed.";
+        return NextResponse.json(
+            { error: message },
+            { status: 502, headers: rateLimitHeaders(rateLimit) }
+        );
+    }
+}
+
 async function startMultipartUpload(
     account: string,
     blobName: string,
-    partSize: number
+    partSize: number,
+    timings: UploadTimings
 ) {
     for (let attempt = 0; attempt <= SHELBY_START_RETRY_DELAYS_MS.length; attempt += 1) {
+        timings.startAttempts = attempt + 1;
         const response = await fetchWithTimeout(
             buildRpcUrl("/v1/multipart-uploads"),
             {
@@ -126,8 +324,9 @@ async function startMultipartUpload(
     throw new Error("Failed to start Shelby upload after retry.");
 }
 
-async function completeMultipartUpload(uploadId: string) {
+async function completeMultipartUpload(uploadId: string, timings: UploadTimings) {
     for (let attempt = 0; attempt <= SHELBY_COMPLETE_RETRY_DELAYS_MS.length; attempt += 1) {
+        timings.completeAttempts = attempt + 1;
         const response = await fetchWithTimeout(
             buildRpcUrl(`/v1/multipart-uploads/${uploadId}/complete`),
             {
@@ -217,6 +416,12 @@ export async function POST(req: NextRequest) {
         );
     }
 
+    const phase: UploadPhase = body.phase === "complete" ? "complete" : "start";
+
+    if (phase === "complete") {
+        return handleComplete(req, body, rateLimit);
+    }
+
     const validationError = validateUploadBody(body);
     if (validationError) {
         return NextResponse.json(
@@ -227,6 +432,15 @@ export async function POST(req: NextRequest) {
 
     const account = body.account as string;
     const blobName = body.blobName as string;
+
+    const proof = requireUploadProof(req, account, blobName, "start");
+    if (!proof.ok) {
+        return NextResponse.json(
+            { error: proof.error, required_message: proof.requiredMessage },
+            { status: 401, headers: rateLimitHeaders(rateLimit) }
+        );
+    }
+
     const payloadBytes = new TextEncoder().encode(
         JSON.stringify({
             ciphertextHex: body.ciphertextHex,
@@ -234,13 +448,23 @@ export async function POST(req: NextRequest) {
         })
     );
 
+    const timings: UploadTimings = {
+        startMs: 0,
+        startAttempts: 0,
+        partMs: 0,
+        completeMs: 0,
+        completeAttempts: 0,
+    };
+
     try {
         const partSize = Math.max(
             payloadBytes.length,
             MIN_SHELBY_PART_SIZE_BYTES
         );
+        const startedAt = Date.now();
         const { response: startResponse, errorBody: startErrorBody } =
-            await startMultipartUpload(account, blobName, partSize);
+            await startMultipartUpload(account, blobName, partSize, timings);
+        timings.startMs = Date.now() - startedAt;
 
         if (!startResponse.ok) {
             return NextResponse.json(
@@ -254,6 +478,7 @@ export async function POST(req: NextRequest) {
         const { uploadId } = (await startResponse.json()) as { uploadId?: string };
         if (!uploadId) throw new Error("Shelby upload did not return an upload id.");
 
+        const partStartedAt = Date.now();
         const partResponse = await fetchWithTimeout(
             buildRpcUrl(`/v1/multipart-uploads/${uploadId}/parts/0`),
             {
@@ -264,6 +489,7 @@ export async function POST(req: NextRequest) {
             SHELBY_PART_TIMEOUT_MS,
             "Uploading encrypted content to Shelby"
         );
+        timings.partMs = Date.now() - partStartedAt;
 
         if (!partResponse.ok) {
             return NextResponse.json(
@@ -274,20 +500,13 @@ export async function POST(req: NextRequest) {
             );
         }
 
-        const { response: completeResponse, errorBody: completeErrorBody } =
-            await completeMultipartUpload(uploadId);
-
-        if (!completeResponse.ok) {
-            return NextResponse.json(
-                {
-                    error: `Failed to finalize Shelby upload. uploadId: ${uploadId}, status: ${completeResponse.status}, body: ${completeErrorBody}`,
-                },
-                { status: completeResponse.status, headers: rateLimitHeaders(rateLimit) }
-            );
-        }
+        // Bytes are transferred. Hand the uploadId back so the caller can
+        // finalize separately and overlap that wait with its own work.
+        rememberPendingUpload(uploadId, account, blobName);
+        logStartTimings(timings, payloadBytes.length, partSize);
 
         return NextResponse.json(
-            { ok: true },
+            { uploadId, startMs: timings.startMs, partMs: timings.partMs },
             { headers: rateLimitHeaders(rateLimit) }
         );
     } catch (error: unknown) {

@@ -16,7 +16,35 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { CheckCircle2, Clipboard, LockKeyhole, Wallet } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { CheckCircle2, Clipboard, LockKeyhole, Minus, Plus, Wallet } from "lucide-react";
+
+/// Human-readable duration for a subscription window.
+function formatPeriod(seconds: number): string {
+    if (seconds <= 0) return "no period set";
+    const days = Math.round(seconds / 86_400);
+    if (days % 365 === 0) {
+        const years = days / 365;
+        return `${years} year${years === 1 ? "" : "s"}`;
+    }
+    if (days % 30 === 0) {
+        const months = days / 30;
+        return `${months} month${months === 1 ? "" : "s"}`;
+    }
+    if (days % 7 === 0) {
+        const weeks = days / 7;
+        return `${weeks} week${weeks === 1 ? "" : "s"}`;
+    }
+    return `${days} day${days === 1 ? "" : "s"}`;
+}
+
+/// "in 12 days" / "expired" for a unix-seconds deadline.
+function formatDaysLeft(expiresAtSecs: number): string {
+    const days = Math.ceil((expiresAtSecs * 1000 - Date.now()) / 86_400_000);
+    if (days < 0) return "expired";
+    if (days === 0) return "ends today";
+    return `${days} day${days === 1 ? "" : "s"} left`;
+}
 
 export default function PromptDetailPage() {
     const params = useParams();
@@ -35,8 +63,29 @@ export default function PromptDetailPage() {
     const [copied, setCopied] = useState(false);
     const [copyError, setCopyError] = useState(false);
 
-    const { hasAccess, loading: accessLoading, refresh: refreshAccess } = useAccessCheck(promptId);
-    const { txState, unlockPrompt, reset } = useUnlockPrompt();
+    const {
+        hasAccess,
+        record: accessRecord,
+        loading: accessLoading,
+        refresh: refreshAccess,
+    } = useAccessCheck(promptId);
+    const { txState, unlockPrompt, subscribe, purchaseApiCalls, reset } =
+        useUnlockPrompt();
+
+    // How much to buy. Subscriptions are counted in billing periods, API
+    // listings in calls — the contract decides the period length and the
+    // per-call price, so quantity is the only choice a buyer makes.
+    const [quantity, setQuantity] = useState(1);
+
+    const isSubscription = prompt?.pricingModel === "subscription";
+    const isApi = prompt?.pricingModel === "api-pay-per-call";
+    const periodSecs = prompt?.subscriptionPeriodSecs ?? 0;
+    // Mirrors MAX_PERIODS_PER_PURCHASE / MAX_API_CALLS_PER_PURCHASE in payment.move.
+    const maxQuantity = isSubscription ? 120 : isApi ? 1_000_000 : 1;
+    const isBusy =
+        txState.status === "signing" ||
+        txState.status === "submitting" ||
+        txState.status === "confirming";
 
     // Fetch prompt metadata
     useEffect(() => {
@@ -91,7 +140,8 @@ export default function PromptDetailPage() {
                     import("@/lib/ace"),
                     import("@aptos-labs/ts-sdk"),
                 ]);
-                const { ciphertextHex, domainHex } = await shelbyService.readEncryptedBlob(prompt.blobId);
+                const { ciphertextHex, domainHex } =
+                    await shelbyService.readEncryptedBlob(promptId);
 
                 // 2. Ask the wallet to sign the ACE permission message
                 //    This proves to ACE workers that the user controls this account
@@ -149,8 +199,21 @@ export default function PromptDetailPage() {
         }
     }, [txState.status, refreshAccess]);
 
-    const handleUnlock = async () => {
+    // Each pricing model has its own entry function, and the contract rejects
+    // paying through the wrong one — so the button has to match the listing.
+    const handleBuy = async () => {
         reset();
+
+        if (prompt?.pricingModel === "subscription") {
+            await subscribe(promptId, quantity);
+            return;
+        }
+
+        if (prompt?.pricingModel === "api-pay-per-call") {
+            await purchaseApiCalls(promptId, quantity);
+            return;
+        }
+
         await unlockPrompt(promptId);
     };
 
@@ -215,7 +278,11 @@ export default function PromptDetailPage() {
                                 {formatApt(prompt.price)}
                             </div>
                             <div className="text-xs font-black uppercase tracking-wide text-cream/40">
-                                {prompt.pricingModel.replace(/-/g, " ")}
+                                {isSubscription
+                                    ? `per ${formatPeriod(periodSecs)}`
+                                    : isApi
+                                      ? "per api call"
+                                      : prompt.pricingModel.replace(/-/g, " ")}
                             </div>
                         </div>
                     </div>
@@ -259,13 +326,44 @@ export default function PromptDetailPage() {
                             <div className="flex items-center justify-between mb-4">
                                 <h2 className="flex items-center gap-2 text-lg font-black text-cream">
                                     <CheckCircle2 className="h-5 w-5 text-accent-green" />
-                                    Unlocked
+                                    {accessRecord.accessType === "subscription"
+                                        ? "Subscribed"
+                                        : accessRecord.accessType === "api"
+                                          ? "API access"
+                                          : "Unlocked"}
                                 </h2>
                                 <Button onClick={handleCopy} variant="ghost" size="sm">
                                     <Clipboard className="h-4 w-4" />
                                     {copied ? "Copied" : "Copy"}
                                 </Button>
                             </div>
+
+                            {/* What the buyer actually holds: a window that ends,
+                                a quota that depletes, or nothing that expires. */}
+                            {accessRecord.accessType === "subscription" &&
+                                accessRecord.expiresAt > 0 && (
+                                    <p className="mb-4 text-xs font-semibold text-cream/45">
+                                        Access runs until{" "}
+                                        <span className="text-cream/70">
+                                            {new Date(
+                                                accessRecord.expiresAt * 1000
+                                            ).toLocaleString()}
+                                        </span>{" "}
+                                        ({formatDaysLeft(accessRecord.expiresAt)}). Buy more
+                                        periods any time — they stack onto this date.
+                                    </p>
+                                )}
+
+                            {accessRecord.accessType === "api" && (
+                                <p className="mb-4 text-xs font-semibold text-cream/45">
+                                    <span className="text-cream/70">
+                                        {accessRecord.apiCallsRemaining}
+                                    </span>{" "}
+                                    API call
+                                    {accessRecord.apiCallsRemaining === 1 ? "" : "s"} left.
+                                    Each request through the API spends one.
+                                </p>
+                            )}
 
                             {copyError && (
                                 <p className="mb-3 text-xs font-semibold text-accent-red">
@@ -299,27 +397,90 @@ export default function PromptDetailPage() {
                             )}
                         </div>
                     ) : (
-                        /* ── User needs to unlock ── */
+                        /* ── User needs to buy ── */
                         <div className="text-center py-4">
                             <LockKeyhole className="mx-auto mb-4 h-11 w-11 text-retro-coral" />
                             <p className="mb-6 font-semibold text-cream/60">
-                                Unlock this prompt to view the full content
+                                {isSubscription
+                                    ? `Subscribe to read this prompt. ${formatApt(prompt.price)} buys ${formatPeriod(periodSecs)} of access.`
+                                    : isApi
+                                      ? `This prompt is sold per API call at ${formatApt(prompt.price)} each.`
+                                      : "Unlock this prompt to view the full content"}
                             </p>
 
+                            {/* Quantity, for the two models that have one */}
+                            {(isSubscription || isApi) && (
+                                <div className="mx-auto mb-6 max-w-xs">
+                                    <label className="mb-2 block text-xs font-black uppercase tracking-widest text-cream/65">
+                                        {isSubscription
+                                            ? "How many periods"
+                                            : "How many calls"}
+                                    </label>
+                                    <div className="flex items-center gap-2">
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            size="sm"
+                                            aria-label="Decrease"
+                                            onClick={() =>
+                                                setQuantity((q) => Math.max(1, q - 1))
+                                            }
+                                            disabled={quantity <= 1 || isBusy}
+                                        >
+                                            <Minus className="h-3.5 w-3.5" />
+                                        </Button>
+                                        <Input
+                                            type="number"
+                                            min={1}
+                                            max={maxQuantity}
+                                            inputMode="numeric"
+                                            className="text-center"
+                                            value={quantity}
+                                            onChange={(e) => {
+                                                const next = Number(e.target.value);
+                                                if (!Number.isFinite(next)) return;
+                                                setQuantity(
+                                                    Math.min(maxQuantity, Math.max(1, Math.floor(next)))
+                                                );
+                                            }}
+                                        />
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            size="sm"
+                                            aria-label="Increase"
+                                            onClick={() =>
+                                                setQuantity((q) => Math.min(maxQuantity, q + 1))
+                                            }
+                                            disabled={quantity >= maxQuantity || isBusy}
+                                        >
+                                            <Plus className="h-3.5 w-3.5" />
+                                        </Button>
+                                    </div>
+                                    <p className="mt-2 text-xs font-semibold text-cream/45">
+                                        {isSubscription
+                                            ? `${formatPeriod(periodSecs * quantity)} of access`
+                                            : `${quantity} call${quantity === 1 ? "" : "s"}`}{" "}
+                                        • total {formatApt(prompt.price * quantity)}
+                                    </p>
+                                </div>
+                            )}
+
                             <Button
-                                onClick={handleUnlock}
-                                disabled={
-                                    txState.status === "signing" ||
-                                    txState.status === "submitting" ||
-                                    txState.status === "confirming"
-                                }
+                                onClick={handleBuy}
+                                disabled={isBusy}
                                 size="lg"
                             >
-                                {txState.status === "idle" && `Unlock for ${formatApt(prompt.price)}`}
+                                {txState.status === "idle" &&
+                                    (isSubscription
+                                        ? `Subscribe for ${formatApt(prompt.price * quantity)}`
+                                        : isApi
+                                          ? `Buy ${quantity} call${quantity === 1 ? "" : "s"} for ${formatApt(prompt.price * quantity)}`
+                                          : `Unlock for ${formatApt(prompt.price)}`)}
                                 {txState.status === "signing" && "Waiting for signature..."}
                                 {txState.status === "submitting" && "Submitting..."}
                                 {txState.status === "confirming" && "Confirming..."}
-                                {txState.status === "success" && "Unlocked ✓"}
+                                {txState.status === "success" && "Done ✓"}
                                 {txState.status === "error" && "Try Again"}
                             </Button>
 

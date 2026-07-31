@@ -84,8 +84,10 @@ export function useUnlockPrompt() {
         [account, signAndSubmitTransaction]
     );
 
+    /// The listing owns the period length; the buyer only picks how many
+    /// periods to pay for. Renewing before expiry extends the existing window.
     const subscribe = useCallback(
-        async (promptId: string, durationSecs: number) => {
+        async (promptId: string, numPeriods: number) => {
             if (!account) {
                 setTxState({ status: "error", error: "Wallet not connected" });
                 return null;
@@ -93,7 +95,7 @@ export function useUnlockPrompt() {
 
             try {
                 setTxState({ status: "signing" });
-                const payload = buildSubscribePayload(promptId, durationSecs);
+                const payload = buildSubscribePayload(promptId, numPeriods);
                 setTxState({ status: "submitting" });
 
                 const response = await signAndSubmitTransaction({ data: payload });

@@ -3,10 +3,28 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { waitForTransactionServer } from "@/lib/aptosServer";
+import { MODULES } from "@/lib/constants";
 import { isRateLimitError } from "@/lib/utils";
 import { checkRateLimit, rateLimitHeaders } from "@/lib/apiSecurity";
 
 export const dynamic = "force-dynamic";
+
+/// Pull the prompt_id straight out of the PromptRegistered event so the
+/// creator flow never has to guess which listing it just created.
+function extractRegisteredPromptId(transaction: unknown): string | null {
+    const events = (transaction as { events?: unknown }).events;
+    if (!Array.isArray(events)) return null;
+
+    const registered = events.find(
+        (event) =>
+            (event as { type?: unknown }).type ===
+            `${MODULES.PROMPT_REGISTRY}::PromptRegistered`
+    );
+    const promptId = (registered as { data?: { prompt_id?: unknown } } | undefined)
+        ?.data?.prompt_id;
+
+    return typeof promptId === "string" ? promptId : null;
+}
 
 type TransactionWaitBody = {
     transactionHash?: unknown;
@@ -64,10 +82,16 @@ export async function POST(req: NextRequest) {
     }
 
     try {
-        await waitForTransactionServer(body.transactionHash, parseOptions(body.options));
+        const transaction = await waitForTransactionServer(
+            body.transactionHash,
+            parseOptions(body.options)
+        );
 
         return NextResponse.json(
-            { transactionHash: body.transactionHash },
+            {
+                transactionHash: body.transactionHash,
+                promptId: extractRegisteredPromptId(transaction),
+            },
             { headers: rateLimitHeaders(rateLimit) }
         );
     } catch (error: unknown) {

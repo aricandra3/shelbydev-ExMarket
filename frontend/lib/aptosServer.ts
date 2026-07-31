@@ -4,10 +4,24 @@
 import { Aptos, AptosConfig, Network } from "@aptos-labs/ts-sdk";
 import { APTOS_INDEXER_URL, APTOS_NODE_URL, NETWORK } from "./constants";
 import { isRateLimitError } from "./utils";
+import { warnAboutMisplacedKeys } from "./envCheck";
 
 const isCustomNetwork = NETWORK === "shelbynet";
 const APTOS_API_KEY = process.env.APTOS_API_KEY || "";
 const APTOS_API_ORIGIN = process.env.APTOS_API_ORIGIN || "http://localhost:3000";
+
+warnAboutMisplacedKeys([
+    {
+        name: "APTOS_API_KEY",
+        value: APTOS_API_KEY,
+        purpose: "Aptos reads",
+    },
+    {
+        name: "SHELBY_API_KEY",
+        value: process.env.SHELBY_API_KEY || "",
+        purpose: "Shelby uploads and egress accounting",
+    },
+]);
 
 const config = new AptosConfig({
     network: isCustomNetwork ? Network.CUSTOM : Network.TESTNET,
@@ -72,7 +86,12 @@ async function runLimitedView<T>(task: () => Promise<T>): Promise<T> {
     }
 }
 
-async function retryView<T>(task: () => Promise<T>, retries = 2): Promise<T> {
+/// Retries exist only for rate-limit errors, and the Aptos key's limit is a
+/// 200-request budget over a 5-minute window — not a short burst limit. Retrying
+/// inside that window cannot succeed and spends the budget three times over,
+/// which is how a single busy page turned into a wall of 429s. Fail fast and let
+/// callers serve cached or stale data instead.
+async function retryView<T>(task: () => Promise<T>, retries = 0): Promise<T> {
     for (let attempt = 0; attempt <= retries; attempt += 1) {
         try {
             return await task();

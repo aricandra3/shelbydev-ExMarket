@@ -16,7 +16,6 @@
 module exmarket::ace_access_control {
     use std::vector;
     use aptos_std::from_bcs;
-    use aptos_std::bcs;
     use exmarket::access_control;
 
     // ── Constants ─────────────────────────────────────────────────────────────
@@ -24,13 +23,13 @@ module exmarket::ace_access_control {
 
     // ── View Function ─────────────────────────────────────────────────────────
 
-    /// Called by ACE workers to verify buyer permission before releasing key shares.
-    ///
-    /// `user`   = wallet address of the buyer requesting decryption
-    /// `domain` = UTF-8 bytes of "prompts/<64-char-hex-prompt-id>"
-    ///
-    /// Returns true if the user has valid on-chain access (paid / subscribed /
-    /// has API calls remaining) for the prompt referenced by the domain.
+    // Called by ACE workers to verify buyer permission before releasing key shares.
+    //
+    // `user`   = wallet address of the buyer requesting decryption
+    // `domain` = UTF-8 bytes of "prompts/<64-char-hex-prompt-id>"
+    //
+    // Returns true if the user has valid on-chain access (paid / subscribed /
+    // has API calls remaining) for the prompt referenced by the domain.
     #[view]
     public fun check_permission(user: address, domain: vector<u8>): bool {
         let (prompt_id, ok) = parse_prompt_id(domain);

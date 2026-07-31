@@ -1,189 +1,115 @@
-/// API Route: Prompt content endpoint for API monetization
-/// Verifies on-chain access before serving blob content
+/// API Route: paid programmatic access to a prompt's stored content.
+///
+/// Flow for a caller (an agent, a backend, a builder's script):
+///   1. Unlock the prompt on-chain (or hold a live subscription / API quota).
+///   2. Sign the proof message this route returns in `required_message`.
+///   3. For api-pay-per-call listings, submit one
+///      access_control::consume_api_call transaction and pass its hash in
+///      X-Consume-Tx — that is what makes per-call billing real rather than
+///      decorative.
+///
+/// What comes back is the ACE-encrypted payload, not plaintext: the whole point
+/// of the design is that only the buyer's wallet can unwrap it, and this server
+/// has no way to do that on their behalf. Decrypt client-side with the ACE SDK
+/// using `ciphertext_hex` and `domain_hex`, and check the bytes against
+/// `content_hash` to confirm Shelby served what the listing committed to.
 
 import { NextRequest, NextResponse } from "next/server";
+import { AccountAddress } from "@aptos-labs/ts-sdk";
 import {
-    AccountAddress,
-    AuthenticationKey,
-    Ed25519PublicKey,
-    Ed25519Signature,
-} from "@aptos-labs/ts-sdk";
-import { hasAccessServer, getPromptBlobIdServer } from "@/lib/contractsServer";
-import { shelbyService } from "@/lib/shelby";
+    getApiCallsRemainingServer,
+    getPromptMetadataServer,
+    hasAccessServer,
+} from "@/lib/contractsServer";
+import { aptosServerClient } from "@/lib/aptosServer";
+import { MODULES } from "@/lib/constants";
+import { readEncryptedBlobServer } from "@/lib/shelbyServer";
 import { isRateLimitError } from "@/lib/utils";
 import { checkRateLimit, rateLimitHeaders } from "@/lib/apiSecurity";
+import {
+    buildProofMessageFormat,
+    consumeNonce,
+    verifyWalletProof,
+} from "@/lib/walletProof";
 
 export const runtime = "nodejs";
 
-const WALLET_PROOF_MAX_AGE_MS = 5 * 60 * 1000;
-const WALLET_PROOF_CLOCK_SKEW_MS = 30 * 1000;
-const seenWalletProofNonces = new Map<string, number>();
-
-function getRequiredApiMessage(
-    promptId: string,
-    walletAddress: string,
-    timestamp: string,
-    nonce: string
-) {
-    return [
-        "ExMarket API prompt access",
-        `Prompt: ${promptId}`,
-        `Wallet: ${walletAddress}`,
-        `Timestamp: ${timestamp}`,
-        `Nonce: ${nonce}`,
-    ].join("\n");
-}
-
-function getRequiredApiMessageFormat(promptId: string, walletAddress: string) {
-    return [
-        "ExMarket API prompt access",
-        `Prompt: ${promptId}`,
-        `Wallet: ${walletAddress}`,
-        "Timestamp: <unix_ms>",
-        "Nonce: <random_16_to_128_chars>",
-    ].join("\n");
-}
-
-function cleanupExpiredNonces(now: number) {
-    if (seenWalletProofNonces.size < 1_000) return;
-
-    Array.from(seenWalletProofNonces.entries()).forEach(([key, expiresAt]) => {
-        if (expiresAt <= now) {
-            seenWalletProofNonces.delete(key);
-        }
-    });
-}
-
-function consumeWalletProofNonce(
-    walletAddress: string,
-    promptId: string,
-    nonce: string
-) {
-    const now = Date.now();
-    cleanupExpiredNonces(now);
-
-    const key = `${walletAddress}:${promptId}:${nonce}`;
-    const existingExpiry = seenWalletProofNonces.get(key);
-
-    if (existingExpiry && existingExpiry > now) {
-        return false;
-    }
-
-    seenWalletProofNonces.set(
-        key,
-        now + WALLET_PROOF_MAX_AGE_MS + WALLET_PROOF_CLOCK_SKEW_MS
-    );
-    return true;
-}
-
-function validateWalletProofFreshness(
-    timestampHeader: string | null,
-    nonce: string | null
-) {
-    if (!timestampHeader || !nonce) {
-        return "Missing wallet proof timestamp or nonce";
-    }
-
-    if (!/^\d{10,17}$/.test(timestampHeader)) {
-        return "Invalid wallet proof timestamp";
-    }
-
-    if (nonce.length < 16 || nonce.length > 128 || /\s/.test(nonce)) {
-        return "Invalid wallet proof nonce";
-    }
-
-    const timestampMs = Number(timestampHeader);
-    const now = Date.now();
-
-    if (!Number.isFinite(timestampMs)) {
-        return "Invalid wallet proof timestamp";
-    }
-
-    if (timestampMs > now + WALLET_PROOF_CLOCK_SKEW_MS) {
-        return "Wallet proof timestamp is too far in the future";
-    }
-
-    if (now - timestampMs > WALLET_PROOF_MAX_AGE_MS) {
-        return "Wallet proof has expired";
-    }
-
-    return null;
-}
-
-function verifyWalletProof(req: NextRequest, promptId: string, walletAddress: string) {
-    const publicKeyHex = req.headers.get("X-Wallet-Public-Key");
-    const signatureHex = req.headers.get("X-Wallet-Signature");
-    const signedMessage = req.headers.get("X-Wallet-Message");
-    const timestamp = req.headers.get("X-Wallet-Timestamp");
-    const nonce = req.headers.get("X-Wallet-Nonce");
-
-    if (!publicKeyHex || !signatureHex || !signedMessage || !timestamp || !nonce) {
-        return {
-            ok: false,
-            error: "Missing wallet proof headers",
-            requiredMessage: getRequiredApiMessageFormat(promptId, walletAddress),
-            nonce: null,
-        };
-    }
-
-    const normalizedAddress = AccountAddress.fromString(walletAddress).toString();
-    const freshnessError = validateWalletProofFreshness(timestamp, nonce);
-    const requiredMessage = getRequiredApiMessage(
-        promptId,
-        normalizedAddress,
-        timestamp,
-        nonce
-    );
-
-    if (freshnessError) {
-        return {
-            ok: false,
-            error: freshnessError,
-            requiredMessage,
-            nonce: null,
-        };
-    }
-
-    if (signedMessage !== requiredMessage) {
-        return {
-            ok: false,
-            error: "Wallet proof message does not match this prompt request",
-            requiredMessage,
-            nonce: null,
-        };
-    }
-
-    const publicKey = new Ed25519PublicKey(publicKeyHex);
-    const signature = new Ed25519Signature(signatureHex);
-    const derivedAddress = AuthenticationKey.fromPublicKey({ publicKey })
-        .derivedAddress()
-        .toString();
-
-    if (derivedAddress !== normalizedAddress) {
-        return {
-            ok: false,
-            error: "Wallet proof public key does not match wallet address",
-            requiredMessage,
-            nonce: null,
-        };
-    }
-
-    const valid = publicKey.verifySignature({
-        message: new TextEncoder().encode(requiredMessage),
-        signature,
-    });
-
-    return {
-        ok: valid,
-        error: valid ? null : "Invalid wallet proof signature",
-        requiredMessage,
-        nonce,
-    };
-}
+const PROOF_ACTION = "ExMarket API prompt access";
+const CONSUME_TX_MAX_AGE_MS = 10 * 60 * 1000;
 
 type PromptRouteContext = {
     params: Promise<{ id: string }>;
 };
+
+/// Verify that `txHash` is a fresh, successful consume_api_call from this
+/// wallet for this prompt, and that it has not been presented before.
+///
+/// Metering has to be the caller's own transaction: consume_api_call takes the
+/// user's signer, so no server-side key can spend their quota for them. That
+/// keeps billing trustless at the cost of one transaction per call.
+async function verifyConsumeTx(
+    txHash: string,
+    walletAddress: string,
+    promptId: string
+): Promise<string | null> {
+    if (!/^0x[a-fA-F0-9]{16,}$/.test(txHash)) {
+        return "Invalid X-Consume-Tx transaction hash";
+    }
+
+    let transaction: any;
+    try {
+        transaction = await aptosServerClient.getTransactionByHash({
+            transactionHash: txHash,
+        });
+    } catch {
+        return "X-Consume-Tx transaction was not found";
+    }
+
+    if (transaction?.success !== true) {
+        return "X-Consume-Tx transaction did not succeed";
+    }
+
+    const sender = String(transaction.sender ?? "");
+    try {
+        if (AccountAddress.fromString(sender).toString() !== walletAddress) {
+            return "X-Consume-Tx was not sent by this wallet";
+        }
+    } catch {
+        return "X-Consume-Tx has an unreadable sender";
+    }
+
+    const fn = String(transaction.payload?.function ?? "");
+    if (fn !== `${MODULES.ACCESS_CONTROL}::consume_api_call`) {
+        return "X-Consume-Tx is not a consume_api_call transaction";
+    }
+
+    const args = transaction.payload?.functionArguments ?? transaction.payload?.arguments;
+    const txPromptId = Array.isArray(args) ? String(args[0] ?? "") : "";
+    let normalizedTxPromptId: string;
+    let normalizedPromptId: string;
+    try {
+        normalizedTxPromptId = AccountAddress.fromString(txPromptId).toString();
+        normalizedPromptId = AccountAddress.fromString(promptId).toString();
+    } catch {
+        return "X-Consume-Tx does not reference a readable prompt id";
+    }
+    if (normalizedTxPromptId !== normalizedPromptId) {
+        return "X-Consume-Tx consumed a call for a different prompt";
+    }
+
+    // timestamp is in microseconds
+    const timestampMs = Number(transaction.timestamp ?? 0) / 1000;
+    if (!Number.isFinite(timestampMs) || Date.now() - timestampMs > CONSUME_TX_MAX_AGE_MS) {
+        return "X-Consume-Tx is too old — submit a fresh consume_api_call";
+    }
+
+    // One served response per consume transaction.
+    if (!consumeNonce(`consume-tx:${walletAddress}:${promptId}`, txHash)) {
+        return "X-Consume-Tx has already been used for a response";
+    }
+
+    return null;
+}
 
 export async function GET(req: NextRequest, { params }: PromptRouteContext) {
     const rateLimit = checkRateLimit(req.headers, {
@@ -207,14 +133,23 @@ export async function GET(req: NextRequest, { params }: PromptRouteContext) {
         );
     }
 
-    // 1. Extract wallet address from header
     const walletAddress = req.headers.get("X-Wallet-Address");
     if (!walletAddress) {
         return NextResponse.json(
-            { error: "Missing X-Wallet-Address header" },
+            {
+                error: "Missing X-Wallet-Address header",
+                required_message: buildProofMessageFormat({
+                    action: PROOF_ACTION,
+                    bindings: [
+                        ["Prompt", promptId],
+                        ["Wallet", "<your_wallet_address>"],
+                    ],
+                }),
+            },
             { status: 401, headers: rateLimitHeaders(rateLimit) }
         );
     }
+
     let normalizedWalletAddress: string;
     try {
         normalizedWalletAddress = AccountAddress.fromString(walletAddress).toString();
@@ -226,63 +161,132 @@ export async function GET(req: NextRequest, { params }: PromptRouteContext) {
     }
 
     try {
-        const proof = verifyWalletProof(req, promptId, normalizedWalletAddress);
+        const proof = verifyWalletProof({
+            headers: req.headers,
+            walletAddress: normalizedWalletAddress,
+            action: PROOF_ACTION,
+            bindings: [
+                ["Prompt", promptId],
+                ["Wallet", normalizedWalletAddress],
+            ],
+            scope: `api-prompt:${promptId}`,
+        });
+
         if (!proof.ok) {
             return NextResponse.json(
-                {
-                    error: proof.error,
-                    required_message: proof.requiredMessage,
-                },
+                { error: proof.error, required_message: proof.requiredMessage },
                 { status: 401, headers: rateLimitHeaders(rateLimit) }
             );
         }
 
-        if (
-            proof.nonce &&
-            !consumeWalletProofNonce(normalizedWalletAddress, promptId, proof.nonce)
-        ) {
+        const metadata = await getPromptMetadataServer(promptId, { fresh: true });
+
+        if (metadata.status !== "active") {
             return NextResponse.json(
-                { error: "Wallet proof nonce has already been used" },
-                { status: 401, headers: rateLimitHeaders(rateLimit) }
+                {
+                    error: "This prompt is not available. It is deactivated, or its content is not stored yet.",
+                    prompt_id: promptId,
+                },
+                { status: 409, headers: rateLimitHeaders(rateLimit) }
             );
         }
 
-        // 2. Check on-chain access
-        const accessGranted = await hasAccessServer(normalizedWalletAddress, promptId);
+        const accessGranted = await hasAccessServer(
+            normalizedWalletAddress,
+            promptId,
+            { fresh: true }
+        );
         if (!accessGranted) {
             return NextResponse.json(
                 {
                     error: "Payment required. Unlock this prompt first.",
                     unlock_url: `/prompt/${promptId}`,
                     prompt_id: promptId,
+                    pricing_model: metadata.pricingModel,
+                    price_octas: metadata.price,
                 },
                 { status: 402, headers: rateLimitHeaders(rateLimit) }
             );
         }
 
-        // 3. Get blob ID from on-chain metadata
-        const blobId = await getPromptBlobIdServer(promptId);
-        if (!blobId) {
+        // Per-call listings bill per response, proven by the caller's own
+        // consume_api_call transaction.
+        let callsRemaining: number | null = null;
+        if (metadata.pricingModel === "api-pay-per-call") {
+            const consumeTx = req.headers.get("X-Consume-Tx");
+            if (!consumeTx) {
+                return NextResponse.json(
+                    {
+                        error: "This listing bills per call. Submit an access_control::consume_api_call transaction and pass its hash in X-Consume-Tx.",
+                        prompt_id: promptId,
+                        consume_function: `${MODULES.ACCESS_CONTROL}::consume_api_call`,
+                        calls_remaining: await getApiCallsRemainingServer(
+                            normalizedWalletAddress,
+                            promptId
+                        ),
+                    },
+                    { status: 402, headers: rateLimitHeaders(rateLimit) }
+                );
+            }
+
+            const consumeError = await verifyConsumeTx(
+                consumeTx,
+                normalizedWalletAddress,
+                promptId
+            );
+            if (consumeError) {
+                return NextResponse.json(
+                    { error: consumeError, prompt_id: promptId },
+                    { status: 402, headers: rateLimitHeaders(rateLimit) }
+                );
+            }
+
+            callsRemaining = await getApiCallsRemainingServer(
+                normalizedWalletAddress,
+                promptId
+            );
+        }
+
+        if (!metadata.blobId) {
             return NextResponse.json(
                 { error: "Prompt blob not found" },
                 { status: 404, headers: rateLimitHeaders(rateLimit) }
             );
         }
 
-        // 4. Read blob from Shelby RPC
-        const content = await shelbyService.readPrompt(blobId);
+        // Reads go through the server-side helper so egress is billed to this
+        // project's Shelby key, and it throws on failure — unlike the old
+        // readPrompt, which returned its error as if it were content.
+        const { ciphertextHex, domainHex } = await readEncryptedBlobServer(
+            metadata.blobId
+        );
 
-        // 5. Return content
         return NextResponse.json(
             {
                 prompt_id: promptId,
-                content,
+                encryption: "ace",
+                ciphertext_hex: ciphertextHex,
+                domain_hex: domainHex,
+                content_hash: metadata.contentHash ?? "",
+                blob_id: metadata.blobId,
+                pricing_model: metadata.pricingModel,
+                ...(callsRemaining !== null ? { calls_remaining: callsRemaining } : {}),
+                decrypt: {
+                    sdk: "@aptos-labs/ace-sdk",
+                    steps: [
+                        "ace.Ciphertext.fromHex(ciphertext_hex)",
+                        "ace.FullDecryptionDomain.fromHex(domain_hex)",
+                        "sign the domain's pretty message with this wallet to build a ProofOfPermission",
+                        "ace.DecryptionKey.fetch({ committee, contractId, domain, proof }) then ace.decrypt",
+                    ],
+                    note: "Hash the blob payload with sha-256 and compare against content_hash before trusting it.",
+                },
                 timestamp: Date.now(),
             },
             { headers: rateLimitHeaders(rateLimit) }
         );
     } catch (error: unknown) {
-        console.error("API error:", error);
+        console.error("Prompt API error:", error);
         return NextResponse.json(
             {
                 error: isRateLimitError(error)
@@ -290,7 +294,7 @@ export async function GET(req: NextRequest, { params }: PromptRouteContext) {
                     : "Unable to load prompt content right now.",
             },
             {
-                status: isRateLimitError(error) ? 429 : 500,
+                status: isRateLimitError(error) ? 429 : 502,
                 headers: rateLimitHeaders(rateLimit),
             }
         );

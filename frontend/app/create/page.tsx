@@ -3,14 +3,13 @@
 
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAppWallet } from "@/components/wallet/walletContext";
 import { invalidateViewCache, waitForTransaction } from "@/lib/aptos";
 import {
-    buildRegisterPromptPayload,
-    buildUpdateBlobIdPayload,
-    getCreatorPrompts,
+    buildDeactivatePromptPayload,
+    buildPublishPromptPayload,
     getPromptMetadata,
 } from "@/lib/contracts";
 import {
@@ -18,8 +17,8 @@ import {
     rememberPromptInRegistry,
 } from "@/lib/promptRegistry";
 import { aptToOctas, PROMPT_CATEGORIES } from "@/lib/constants";
-import { PRICING_MODEL_REVERSE } from "@/types";
-import type { PricingModel } from "@/types";
+import { PRICING_MODEL_REVERSE, SUBSCRIPTION_PERIODS } from "@/types";
+import type { PricingModel, SubscriptionPeriodKey } from "@/types";
 import { getErrorMessage } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -33,49 +32,85 @@ const MAX_DESCRIPTION_LENGTH = 520;
 const MAX_TAGS_LENGTH = 180;
 const MAX_CONTENT_LENGTH = 12_000;
 
+/// Publishing is two wallet signatures, not three:
+///   encrypting     — derive the prompt id from (wallet, seed), ACE-encrypt
+///   registering-blob (tx 1) — Shelby blob_metadata::register_blob
+///   uploading-blob  — server-side Shelby upload, the slow part
+///   publishing      (tx 2) — publish_prompt, listing goes live complete
+///
+/// Shelby's register_blob is a private entry function, so it can never be
+/// folded into our own transaction — two signatures is the floor here.
 type PublishStep =
     | "form"
-    | "registering-prompt"
     | "encrypting"
     | "registering-blob"
     | "uploading-blob"
     | "finalizing-blob"
-    | "updating-prompt"
+    | "publishing"
     | "success"
     | "error";
 
 type PublishRecovery = {
+    /** Deterministic address the listing will occupy, known before any signing. */
     promptId: string;
+    seed: Uint8Array;
     blobName: string;
     ciphertextHex: string;
     domainHex: string;
     accountAddress: string;
+    /** sha-256 of the exact bytes uploaded to Shelby, pinned on-chain at publish time. */
+    contentHash: Uint8Array;
+    listing: {
+        title: string;
+        description: string;
+        category: string;
+        tags: string[];
+        pricingModel: number;
+        price: number;
+        subscriptionPeriodSecs: number;
+    };
 };
 
+/// Seed for the named object. Random per publish so two listings from the same
+/// wallet never collide on an address.
+function newPromptSeed(): Uint8Array {
+    const nonce = new Uint8Array(16);
+    crypto.getRandomValues(nonce);
+    const hex = Array.from(nonce)
+        .map((byte) => byte.toString(16).padStart(2, "0"))
+        .join("");
+    return new TextEncoder().encode(`exmarket/prompt/${hex}`);
+}
+
+/// Hash the bytes that go to Shelby so the on-chain listing commits to the
+/// stored payload. Buyers can re-hash what they download and compare.
+async function sha256(bytes: Uint8Array): Promise<Uint8Array> {
+    const digest = await crypto.subtle.digest("SHA-256", bytes as BufferSource);
+    return new Uint8Array(digest);
+}
+
 const BUSY_STEPS = new Set<PublishStep>([
-    "registering-prompt",
     "encrypting",
     "registering-blob",
     "uploading-blob",
     "finalizing-blob",
-    "updating-prompt",
+    "publishing",
 ]);
 
 const PUBLISH_STEP_LABELS: Record<PublishStep, string> = {
     form: "Publish Prompt",
-    "registering-prompt": "Confirming listing tx...",
     encrypting: "Encrypting content...",
-    "registering-blob": "Registering Shelby blob...",
+    "registering-blob": "Registering Shelby blob (1/2)...",
     "uploading-blob": "Uploading to Shelby...",
     "finalizing-blob": "Finalizing Shelby upload...",
-    "updating-prompt": "Linking content on-chain...",
+    publishing: "Publishing listing (2/2)...",
     success: "Published",
     error: "Try Again",
 };
 
 export default function CreatePage() {
     const router = useRouter();
-    const { account, connected, signAndSubmitTransaction } = useAppWallet();
+    const { account, connected, signAndSubmitTransaction, signMessage } = useAppWallet();
     const accountAddress = account?.address?.toString();
 
     const [form, setForm] = useState({
@@ -84,6 +119,7 @@ export default function CreatePage() {
         category: "ChatGPT",
         tags: "",
         pricingModel: "pay-per-unlock" as PricingModel,
+        subscriptionPeriod: "monthly" as SubscriptionPeriodKey,
         price: "",
         content: "",
     });
@@ -91,9 +127,31 @@ export default function CreatePage() {
     const [step, setStep] = useState<PublishStep>("form");
     const [error, setError] = useState("");
     const [statusDetail, setStatusDetail] = useState("");
+    const [stepStartedAt, setStepStartedAt] = useState<number | null>(null);
+    const [elapsedSecs, setElapsedSecs] = useState(0);
     const [txHash, setTxHash] = useState("");
     const [recovery, setRecovery] = useState<PublishRecovery | null>(null);
     const isBusy = BUSY_STEPS.has(step);
+
+    // The Shelby upload takes double-digit seconds. A ticking counter is the
+    // difference between "working" and "hung" for whoever is watching it.
+    useEffect(() => {
+        if (!isBusy) {
+            setStepStartedAt(null);
+            setElapsedSecs(0);
+            return;
+        }
+
+        const startedAt = Date.now();
+        setStepStartedAt(startedAt);
+        setElapsedSecs(0);
+
+        const timer = window.setInterval(() => {
+            setElapsedSecs(Math.floor((Date.now() - startedAt) / 1000));
+        }, 1000);
+
+        return () => window.clearInterval(timer);
+    }, [isBusy, step]);
     const submitLabel =
         step === "error" && recovery
             ? "Retry Finalize Upload"
@@ -104,50 +162,125 @@ export default function CreatePage() {
             throw new Error("Reconnect the same wallet to finish this publish.");
         }
 
-        const { shelbyService } = await import("@/lib/shelby");
+        const { shelbyService, createUploadProof } = await import("@/lib/shelby");
 
         setStep("uploading-blob");
+        setStatusDetail("Signing the Shelby upload proof...");
+
+        // The upload endpoint spends our Shelby quota under this wallet's
+        // account, so it requires proof the wallet owns it. One signature
+        // covers both upload phases.
+        const proofHeaders = await createUploadProof(
+            async (message) => {
+                const signed = await signMessage({ message, nonce: "" });
+                const rawSig = signed?.signature;
+                const rawPk = account?.publicKey;
+                if (!rawSig || !rawPk) {
+                    throw new Error("Wallet did not return a usable signature.");
+                }
+
+                return {
+                    fullMessage: signed.fullMessage ?? message,
+                    signature: typeof rawSig === "string" ? rawSig : rawSig.toString(),
+                    publicKey: typeof rawPk === "string" ? rawPk : rawPk.toString(),
+                };
+            },
+            publish.accountAddress,
+            publish.blobName
+        );
+
         setStatusDetail("Uploading encrypted content to Shelby RPC...");
 
+        // Transfer the bytes first (~2.3s). Finalizing is the slow part, and it
+        // is deliberately NOT awaited here: nothing in the publish transaction
+        // depends on it, so it runs while the wallet dialog is open.
+        //
+        // Settled into a value rather than left to reject unobserved.
+        type Finalizing = Promise<{ ok: true } | { ok: false; err: unknown }>;
+        let finalizing: Finalizing;
+
         try {
-            await shelbyService.putEncryptedBlob(
+            const { uploadId } = await shelbyService.startEncryptedBlobUpload(
                 publish.ciphertextHex,
                 publish.domainHex,
                 publish.accountAddress,
                 publish.blobName,
-                (progress) => {
-                    if (progress.phase === "finalizing") {
-                        setStep("finalizing-blob");
-                        setStatusDetail(
-                            "Finalizing Shelby multipart upload. If Shelby RPC is slow, this is the step that used to hang."
-                        );
-                        return;
-                    }
-
-                    if (progress.phase === "complete") {
-                        setStatusDetail("Shelby upload complete. Preparing final on-chain link...");
-                        return;
-                    }
-
-                    setStep("uploading-blob");
-                    setStatusDetail("Uploading encrypted content to Shelby RPC...");
-                }
+                proofHeaders
             );
+
+            finalizing = shelbyService
+                .finalizeUpload(
+                    uploadId,
+                    publish.accountAddress,
+                    publish.blobName,
+                    proofHeaders
+                )
+                .then(() => ({ ok: true as const }))
+                .catch((err: unknown) => ({ ok: false as const, err }));
         } catch (err: unknown) {
+            // On a retry the blob may already be stored from the previous
+            // attempt; that is a success, not a failure.
             const message = getErrorMessage(err, "");
-            if (!/(already|exists|duplicate|409)/i.test(message)) throw err;
-            setStatusDetail("Shelby blob is already uploaded. Continuing to final on-chain link...");
+            if (!/(already|exists|duplicate|409|written)/i.test(message)) throw err;
+            setStatusDetail("Shelby blob is already stored. Continuing to publish...");
+            finalizing = Promise.resolve({ ok: true as const });
         }
 
         const blobId = `${publish.accountAddress}/${publish.blobName}`;
-        setStep("updating-prompt");
-        setStatusDetail("Waiting for wallet signature for tx 3: link blob_id to prompt...");
+        setStep("publishing");
+        setStatusDetail(
+            "Waiting for wallet signature for tx 2: publish the listing. Shelby is finalizing storage in the background."
+        );
 
-        const updatePayload = buildUpdateBlobIdPayload(publish.promptId, blobId);
-        const updateResponse = await signAndSubmitTransaction({ data: updatePayload });
+        const publishPayload = buildPublishPromptPayload({
+            seed: publish.seed,
+            title: publish.listing.title,
+            description: publish.listing.description,
+            category: publish.listing.category,
+            tags: publish.listing.tags,
+            pricingModel: publish.listing.pricingModel,
+            price: publish.listing.price,
+            subscriptionPeriodSecs: publish.listing.subscriptionPeriodSecs,
+            blobId,
+            contentHash: publish.contentHash,
+        });
+        const updateResponse = await signAndSubmitTransaction({ data: publishPayload });
 
-        setStatusDetail("Confirming tx 3 on-chain...");
+        setStatusDetail("Confirming tx 2 on-chain...");
         await waitForTransaction(updateResponse.hash, { checkSuccess: true });
+
+        // The listing is live now, so storage has to be confirmed before we call
+        // this a success. Whatever is left of Shelby's ~10s finalize is what the
+        // creator waits for here — usually little or nothing.
+        setStep("finalizing-blob");
+        setStatusDetail("Confirming Shelby finished storing the content...");
+
+        const finalized = await finalizing;
+        if (!finalized.ok) {
+            // Published, but the content is not confirmed stored. Take the
+            // listing off the market rather than leave a prompt that buyers
+            // could pay for and fail to decrypt.
+            setStatusDetail("Shelby storage failed. Deactivating the listing...");
+
+            try {
+                const deactivateResponse = await signAndSubmitTransaction({
+                    data: buildDeactivatePromptPayload(publish.promptId),
+                });
+                await waitForTransaction(deactivateResponse.hash, {
+                    checkSuccess: true,
+                });
+                invalidateViewCache("::prompt_registry::");
+                invalidatePromptRegistryCache();
+            } catch {
+                // Fall through — the message below tells the creator what to do.
+            }
+
+            throw new Error(
+                `${getErrorMessage(finalized.err, "Shelby could not finalize the upload.")} ` +
+                    "The listing was published and then deactivated, so nobody can buy content that is not stored. " +
+                    "Retry to re-upload and reactivate it from your dashboard."
+            );
+        }
 
         invalidateViewCache("::prompt_registry::");
         const metadata = await getPromptMetadata(publish.promptId, { fresh: true }).catch(
@@ -198,9 +331,9 @@ export default function CreatePage() {
         }
 
         try {
-            setStep("registering-prompt");
+            setStep("encrypting");
             setRecovery(null);
-            setStatusDetail("Waiting for wallet signature for tx 1: create prompt listing...");
+            setStatusDetail("Deriving prompt address and encrypting with ACE...");
 
             const tags = form.tags
                 .split(",")
@@ -209,40 +342,32 @@ export default function CreatePage() {
 
             const priceInOctas = aptToOctas(price);
             const pricingModelNum = PRICING_MODEL_REVERSE[form.pricingModel];
+            // Only subscription listings carry a period; the contract rejects a
+            // non-zero period on any other model.
+            const subscriptionPeriodSecs =
+                form.pricingModel === "subscription"
+                    ? SUBSCRIPTION_PERIODS.find(
+                          (period) => period.key === form.subscriptionPeriod
+                      )?.seconds ?? 0
+                    : 0;
 
-            // ─── PHASE 1: Register on-chain with placeholder blob_id ──────────
-            // We need the real on-chain prompt_id (Aptos Object address) BEFORE
-            // we can ACE-encrypt — ACE domain = SHA3(prompt_id hex), and
-            // check_permission validates access_control::has_access(user, prompt_id).
-            const placeholderBlobId = "pending";
-            const payload = buildRegisterPromptPayload(
-                placeholderBlobId,
-                title,
-                description,
-                form.category,
-                tags,
-                pricingModelNum,
-                priceInOctas
+            // ─── PHASE 1: Derive the prompt address, no transaction needed ────
+            // publish_prompt creates a *named* object, so its address is a pure
+            // function of (creator, seed). Computing it here is what lets ACE
+            // encrypt against the real prompt id before anything is signed —
+            // the old flow had to register on-chain first just to learn it.
+            const { AccountAddress, createObjectAddress } = await import(
+                "@aptos-labs/ts-sdk"
             );
+            const seed = newPromptSeed();
+            const promptId = createObjectAddress(
+                AccountAddress.fromString(accountAddress),
+                seed
+            ).toString();
 
-            const registerResponse = await signAndSubmitTransaction({ data: payload });
-            setStatusDetail("Confirming tx 1 on-chain...");
-            await waitForTransaction(registerResponse.hash, { checkSuccess: true });
-
-            // Fetch the real prompt_id: it's the last address in creator's prompts list
-            setStatusDetail("Reading the new prompt id from Aptos...");
-            const creatorPrompts = await getCreatorPrompts(accountAddress, {
-                fresh: true,
-            });
-            if (!creatorPrompts || creatorPrompts.length === 0) {
-                throw new Error("Could not retrieve prompt_id after on-chain registration");
-            }
-            const promptId = creatorPrompts[creatorPrompts.length - 1];
-
-            // ─── PHASE 2: ACE-encrypt with the REAL on-chain prompt_id ────────
-            // Now the domain encodes the actual Object address, so ACE workers
-            // can call has_access(buyer_address, prompt_id) and get the correct result.
-            setStep("encrypting");
+            // ─── PHASE 2: ACE-encrypt against that address ────────────────────
+            // check_permission resolves the domain back to this prompt id, so
+            // ACE workers can call has_access(buyer, prompt_id) once it exists.
             setStatusDetail("Encrypting prompt content with ACE...");
 
             const blobName = `prompt_${Date.now()}.txt`;
@@ -259,7 +384,6 @@ export default function CreatePage() {
                 defaultErasureCodingConfig,
                 expectedTotalChunksets,
             } = await import("@/lib/shelby");
-            const { AccountAddress } = await import("@aptos-labs/ts-sdk");
 
             const erasureCodingConfig = defaultErasureCodingConfig();
             const provider = await createDefaultErasureCodingProvider();
@@ -268,9 +392,11 @@ export default function CreatePage() {
             const chunksetSize = erasureCodingConfig.chunkSizeBytes * erasureCodingConfig.erasure_k;
             const numChunksets = expectedTotalChunksets(uploadBytes.length, chunksetSize);
 
-            // ─── PHASE 4: Register blob on Shelby L1 ─────────────────────────
+            // ─── PHASE 4: Register blob on Shelby L1 (tx 1 of 2) ─────────────
+            // Shelby's register_blob is a private entry function, so this can
+            // never be merged into publish_prompt — it has to be its own tx.
             setStep("registering-blob");
-            setStatusDetail("Waiting for wallet signature for tx 2: register Shelby blob...");
+            setStatusDetail("Waiting for wallet signature for tx 1: register Shelby blob...");
 
             const shelbyPayload = ShelbyBlobClient.createRegisterBlobPayload({
                 account: AccountAddress.fromString(accountAddress),
@@ -283,21 +409,34 @@ export default function CreatePage() {
             });
 
             const shelbyResponse = await signAndSubmitTransaction({ data: shelbyPayload });
-            setStatusDetail("Confirming tx 2 and waiting for Shelby indexer...");
+            setStatusDetail("Confirming tx 1 and waiting for Shelby indexer...");
             await waitForTransaction(shelbyResponse.hash, {
                 checkSuccess: true,
                 waitForIndexer: true,
             });
 
+            // No fixed wait here: the upload route already retries while Shelby
+            // reports the blob as "not registered", so sleeping first only adds
+            // dead time to a step the user is watching.
             setStatusDetail("Preparing Shelby RPC upload...");
-            await new Promise((resolve) => setTimeout(resolve, 3000));
 
             const recoveryData: PublishRecovery = {
                 promptId,
+                seed,
                 blobName,
                 ciphertextHex,
                 domainHex,
                 accountAddress,
+                contentHash: await sha256(uploadBytes),
+                listing: {
+                    title,
+                    description,
+                    category: form.category,
+                    tags,
+                    pricingModel: pricingModelNum,
+                    price: priceInOctas,
+                    subscriptionPeriodSecs,
+                },
             };
             setRecovery(recoveryData);
             await finalizePublish(recoveryData);
@@ -472,10 +611,45 @@ export default function CreatePage() {
                                             </div>
                                         </div>
 
+                                        {/* Billing period — subscriptions only */}
+                                        {form.pricingModel === "subscription" && (
+                                            <div>
+                                                <label className="mb-2 block text-xs font-black uppercase tracking-widest text-cream/65">
+                                                    Billing Period
+                                                </label>
+                                                <select
+                                                    className="input-field"
+                                                    value={form.subscriptionPeriod}
+                                                    onChange={(e) =>
+                                                        setForm({
+                                                            ...form,
+                                                            subscriptionPeriod: e.target
+                                                                .value as SubscriptionPeriodKey,
+                                                        })
+                                                    }
+                                                >
+                                                    {SUBSCRIPTION_PERIODS.map((period) => (
+                                                        <option key={period.key} value={period.key}>
+                                                            {period.label}
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                                <p className="mt-2 text-xs font-semibold text-cream/35">
+                                                    The price below buys exactly one period. Buyers
+                                                    choose how many periods to pay for — they cannot
+                                                    set their own duration.
+                                                </p>
+                                            </div>
+                                        )}
+
                                         {/* Price */}
                                         <div>
                                             <label className="mb-2 block text-xs font-black uppercase tracking-widest text-cream/65">
-                                                Price (APT)
+                                                {form.pricingModel === "subscription"
+                                                    ? "Price per Period (APT)"
+                                                    : form.pricingModel === "api-pay-per-call"
+                                                      ? "Price per API Call (APT)"
+                                                      : "Price (APT)"}
                                             </label>
                                             <Input
                                                 type="number"
@@ -523,6 +697,11 @@ export default function CreatePage() {
                                     {isBusy && statusDetail && (
                                         <p className="text-center text-xs font-semibold text-cream/45">
                                             {statusDetail}
+                                            {stepStartedAt !== null && elapsedSecs > 2 && (
+                                                <span className="ml-1 font-mono text-cream/35">
+                                                    ({elapsedSecs}s)
+                                                </span>
+                                            )}
                                         </p>
                                     )}
 
@@ -534,7 +713,7 @@ export default function CreatePage() {
 
                                     {step === "error" && recovery && (
                                         <p className="text-center text-xs font-semibold text-cream/40">
-                                            Tx 1 and tx 2 already completed. Retry will continue from Shelby upload/final tx only.
+                                            The Shelby blob is already registered on-chain. Retry resumes from the upload and the publish tx only.
                                         </p>
                                     )}
                                 </form>

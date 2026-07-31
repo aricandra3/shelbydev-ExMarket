@@ -5,7 +5,7 @@
 import { useEffect, useState, useMemo, useRef } from "react";
 import Link from "next/link";
 import { useAppWallet } from "@/components/wallet/walletContext";
-import { getUserUnlockedPrompts } from "@/lib/contracts";
+import { getAccessRecord, getUserUnlockedPrompts, type AccessRecord } from "@/lib/contracts";
 import { loadPromptRegistry } from "@/lib/promptRegistry";
 import { formatApt } from "@/lib/constants";
 import { getErrorMessage, isRateLimitError } from "@/lib/utils";
@@ -39,7 +39,48 @@ function getAccent(category: string) {
 }
 
 // ── Single prompt card ────────────────────────────────────────────────
-function PromptCard({ prompt, index }: { prompt: PromptMetadata; index: number }) {
+/// What the buyer holds, for the footer badge: perpetual, a window that ends,
+/// or a quota that depletes. get_user_unlocked_prompts returns expired
+/// subscriptions too, so saying "Unlocked" for all of them would be a lie.
+function accessLabel(record?: AccessRecord): { text: string; expired: boolean } {
+  if (!record || record.accessType === "none") {
+    return { text: "Unlocked", expired: false };
+  }
+
+  if (record.accessType === "subscription") {
+    const daysLeft = Math.ceil((record.expiresAt * 1000 - Date.now()) / 86_400_000);
+    if (record.expiresAt > 0 && daysLeft <= 0) {
+      return { text: "Expired", expired: true };
+    }
+    return {
+      text: `${daysLeft} day${daysLeft === 1 ? "" : "s"} left`,
+      expired: false,
+    };
+  }
+
+  if (record.accessType === "api") {
+    if (record.apiCallsRemaining <= 0) {
+      return { text: "No calls left", expired: true };
+    }
+    return {
+      text: `${record.apiCallsRemaining} call${record.apiCallsRemaining === 1 ? "" : "s"}`,
+      expired: false,
+    };
+  }
+
+  return { text: "Unlocked", expired: false };
+}
+
+function PromptCard({
+  prompt,
+  index,
+  record,
+}: {
+  prompt: PromptMetadata;
+  index: number;
+  record?: AccessRecord;
+}) {
+  const access = accessLabel(record);
   const accent = getAccent(prompt.category);
   const isLarge = index % 5 === 1 || index % 5 === 4; // roughly every 2nd/5th card is taller
 
@@ -114,9 +155,17 @@ function PromptCard({ prompt, index }: { prompt: PromptMetadata; index: number }
           <span className="font-mono text-xs font-black text-retro-yellow">
             {formatApt(prompt.price)} APT
           </span>
-          <span className="inline-flex items-center gap-1 rounded-[5px] border-2 border-ink bg-retro-lime px-2.5 py-1 text-[9px] font-black uppercase tracking-widest text-ink">
-            <span className="h-1.5 w-1.5 rounded-full border border-ink bg-ink animate-pulse" />
-            Unlocked
+          <span
+            className={`inline-flex items-center gap-1 rounded-[5px] border-2 border-ink px-2.5 py-1 text-[9px] font-black uppercase tracking-widest text-ink ${
+              access.expired ? "bg-retro-coral" : "bg-retro-lime"
+            }`}
+          >
+            <span
+              className={`h-1.5 w-1.5 rounded-full border border-ink bg-ink ${
+                access.expired ? "" : "animate-pulse"
+              }`}
+            />
+            {access.text}
           </span>
         </div>
       </div>
@@ -163,6 +212,7 @@ export default function LibraryPage() {
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [activeCategory, setActiveCategory] = useState<string>("All");
   const [search, setSearch] = useState("");
+  const [accessRecords, setAccessRecords] = useState<Record<string, AccessRecord>>({});
   const requestIdRef = useRef(0);
 
   useEffect(() => {
@@ -183,6 +233,7 @@ export default function LibraryPage() {
       setLoading(true);
       setError(null);
       setPrompts([]);
+      setAccessRecords({});
       try {
         const [ids, registry] = await Promise.all([
           getUserUnlockedPrompts(accountAddress),
@@ -194,6 +245,24 @@ export default function LibraryPage() {
         );
         if (!cancelled && requestId === requestIdRef.current) {
           setPrompts(metadatas);
+        }
+
+        // Then fill in what each entitlement actually is. Supplementary, so a
+        // failure here leaves the cards rendered without the detail badge.
+        const records: Record<string, AccessRecord> = {};
+        for (const prompt of metadatas) {
+          if (cancelled || requestId !== requestIdRef.current) return;
+          try {
+            records[prompt.promptId] = await getAccessRecord(
+              accountAddress,
+              prompt.promptId
+            );
+          } catch {
+            // leave this one unlabeled
+          }
+        }
+        if (!cancelled && requestId === requestIdRef.current) {
+          setAccessRecords(records);
         }
       } catch (err: unknown) {
         if (!cancelled && requestId === requestIdRef.current) {
@@ -373,7 +442,12 @@ export default function LibraryPage() {
             }}
           >
             {filtered.map((prompt, i) => (
-              <PromptCard key={prompt.promptId} prompt={prompt} index={i} />
+              <PromptCard
+                key={prompt.promptId}
+                prompt={prompt}
+                index={i}
+                record={accessRecords[prompt.promptId]}
+              />
             ))}
           </div>
         )}

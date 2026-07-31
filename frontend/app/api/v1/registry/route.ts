@@ -18,8 +18,11 @@ export const dynamic = "force-dynamic";
 const CACHE_TTL_MS = 60_000;
 const TRANSACTION_SCAN_LIMIT = 200;
 const TRANSACTION_FETCH_CONCURRENCY = 4;
-const INDEXER_PAGE_SIZE = 5;
-const INDEXER_MAX_PAGES = 2;
+// account_transactions is indexed by account and answers in ~0.4s, so scan a
+// wide window: it also contains publish/initialize/unrelated txs, and only the
+// ones carrying a PromptRegistered event become listings.
+const INDEXER_PAGE_SIZE = 100;
+const INDEXER_MAX_PAGES = 3;
 const METADATA_ENRICH_LIMIT = 80;
 const METADATA_ENRICH_CONCURRENCY = 2;
 const RATE_LIMIT_STATUS = 429;
@@ -36,13 +39,13 @@ type AptosTransaction = {
     events?: AptosEvent[];
 };
 
-type IndexerUserTransaction = {
-    version: number | string;
+type IndexerAccountTransaction = {
+    transaction_version: number | string;
 };
 
-type IndexerUserTransactionsResponse = {
+type IndexerAccountTransactionsResponse = {
     data?: {
-        user_transactions?: IndexerUserTransaction[];
+        account_transactions?: IndexerAccountTransaction[];
     };
     errors?: Array<{ message?: string }>;
 };
@@ -93,18 +96,33 @@ async function fetchWithRetry(url: string, init: RequestInit, retries = 2) {
     throw new Error("Failed to fetch after retry");
 }
 
-async function fetchIndexerRegisterPage(
+async function fetchModuleTransactionVersionsPage(
     offset: number
 ): Promise<Array<number | string>> {
+    // Discovery reads `account_transactions` for the module address, which is
+    // indexed by account and answers in well under a second.
+    //
+    // Filtering `user_transactions` by `entry_function_id_str` — the obvious
+    // query — is not indexed and times out against the public testnet indexer
+    // (measured: 10s+ → HTTP 408 for every page size). The indexer also no
+    // longer exposes an `events` table at all.
+    //
+    // Every `register_prompt` bumps `Registry.prompt_count` at @exmarket, so
+    // the module address appears in that transaction's write set no matter who
+    // the creator is — verified with a registration from a non-deployer wallet.
+    // `link_blob` / `unlock_prompt` / `update_price` touch only the prompt
+    // object and the creator's account, so they will NOT show up here. That is
+    // fine: transactions are used to discover prompt ids, and current state
+    // comes from `get_prompt_metadata` in enrichPromptMetadata below.
     const query = `
-        query PromptRegistrations($entryFunction: String!, $limit: Int!, $offset: Int!) {
-            user_transactions(
-                where: { entry_function_id_str: { _eq: $entryFunction } }
-                order_by: { version: desc }
+        query PromptRegistryTransactions($address: String!, $limit: Int!, $offset: Int!) {
+            account_transactions(
+                where: { account_address: { _eq: $address } }
+                order_by: { transaction_version: desc }
                 limit: $limit
                 offset: $offset
             ) {
-                version
+                transaction_version
             }
         }
     `;
@@ -116,7 +134,7 @@ async function fetchIndexerRegisterPage(
         body: JSON.stringify({
             query,
             variables: {
-                entryFunction: `${MODULES.PROMPT_REGISTRY}::register_prompt`,
+                address: MODULE_ADDRESS,
                 limit: INDEXER_PAGE_SIZE,
                 offset,
             },
@@ -127,7 +145,7 @@ async function fetchIndexerRegisterPage(
         throw new Error(`Aptos indexer HTTP ${response.status}: ${response.statusText}`);
     }
 
-    const payload = (await response.json()) as IndexerUserTransactionsResponse;
+    const payload = (await response.json()) as IndexerAccountTransactionsResponse;
     if (payload.errors?.length) {
         throw new Error(
             payload.errors.map((error) => error.message).filter(Boolean).join("; ") ||
@@ -135,17 +153,19 @@ async function fetchIndexerRegisterPage(
         );
     }
 
-    return (payload.data?.user_transactions ?? []).map((tx) => tx.version);
+    return (payload.data?.account_transactions ?? []).map(
+        (tx) => tx.transaction_version
+    );
 }
 
-async function fetchIndexerRegisterVersions(): Promise<Array<number | string>> {
+async function fetchModuleTransactionVersions(): Promise<Array<number | string>> {
     const versions: Array<number | string> = [];
 
     for (let page = 0; page < INDEXER_MAX_PAGES; page += 1) {
         const offset = page * INDEXER_PAGE_SIZE;
 
         try {
-            const pageVersions = await fetchIndexerRegisterPage(offset);
+            const pageVersions = await fetchModuleTransactionVersionsPage(offset);
             versions.push(...pageVersions);
             if (pageVersions.length < INDEXER_PAGE_SIZE) break;
         } catch (error) {
@@ -156,6 +176,74 @@ async function fetchIndexerRegisterVersions(): Promise<Array<number | string>> {
     }
 
     return versions;
+}
+
+/// Which of these versions are actually listing transactions.
+///
+/// account_transactions gives every transaction that touched the module —
+/// publishes, unlocks, deactivations, admin calls. Fetching each one over REST
+/// to find out costs a request apiece, and the Aptos API key allows only 200
+/// requests per 5 minutes. One indexer query keyed by version (its primary key)
+/// answers it instead, cutting the REST fan-out by roughly 4x on this
+/// deployment: 38 versions → 9 worth fetching.
+async function filterListingVersions(
+    versions: Array<number | string>
+): Promise<Array<number | string>> {
+    if (versions.length === 0) return [];
+
+    const query = `
+        query ListingTransactions($versions: [bigint!]) {
+            user_transactions(where: { version: { _in: $versions } }) {
+                version
+                entry_function_id_str
+            }
+        }
+    `;
+
+    try {
+        const response = await fetchWithRetry(APTOS_INDEXER_URL, {
+            method: "POST",
+            headers: getAptosHeaders(true),
+            cache: "no-store",
+            body: JSON.stringify({
+                query,
+                variables: { versions: versions.map((v) => Number(v)) },
+            }),
+        });
+
+        if (!response.ok) throw new Error(`Aptos indexer HTTP ${response.status}`);
+
+        const payload = (await response.json()) as {
+            data?: {
+                user_transactions?: Array<{
+                    version: number | string;
+                    entry_function_id_str?: string | null;
+                }>;
+            };
+            errors?: Array<{ message?: string }>;
+        };
+        if (payload.errors?.length) {
+            throw new Error(payload.errors[0]?.message ?? "indexer query failed");
+        }
+
+        const rows = payload.data?.user_transactions ?? [];
+        const wanted = new Set([
+            `${MODULES.PROMPT_REGISTRY}::publish_prompt`,
+            `${MODULES.PROMPT_REGISTRY}::register_prompt`,
+            `${MODULES.PROMPT_REGISTRY}::link_blob`,
+        ]);
+
+        return rows
+            .filter((row) => row.entry_function_id_str && wanted.has(row.entry_function_id_str))
+            .map((row) => row.version);
+    } catch (error) {
+        // Better to scan everything than to show an empty marketplace.
+        console.warn(
+            "Could not filter versions by entry function; falling back to fetching all.",
+            error
+        );
+        return versions;
+    }
 }
 
 async function fetchTransactionByVersion(
@@ -222,9 +310,15 @@ async function enrichPromptMetadata(
             category: String(result[4]),
             pricingModel: pricingMap[Number(result[5])] || "pay-per-unlock",
             price: Number(result[6]),
-            status: Number(result[7]) === 1 ? "active" : "inactive",
+            status:
+                Number(result[7]) === 1 && Boolean(result[12])
+                    ? "active"
+                    : "inactive",
             totalUnlocks: Number(result[8]),
             totalRevenue: Number(result[9]),
+            subscriptionPeriodSecs: Number(result[10]) || 0,
+            contentHash: String(result[11] ?? ""),
+            blobLinked: Boolean(result[12]),
         };
     } catch (error) {
         console.warn(`Prompt metadata enrichment failed for ${prompt.promptId}`, error);
@@ -278,33 +372,71 @@ async function fetchModuleAccountTransactions(): Promise<AptosTransaction[]> {
     return (await txResp.json()) as AptosTransaction[];
 }
 
+/// Transactions already scanned, so a refresh only pays for what is new.
+///
+/// The Aptos API key allows 200 requests per 5 minutes, and every unscanned
+/// version costs one. Re-reading the same history on each refresh is what
+/// exhausted that budget; in steady state this now costs two indexer queries
+/// and no REST calls at all.
+let scanState: {
+    highestVersion: number;
+    transactions: AptosTransaction[];
+} = { highestVersion: 0, transactions: [] };
+
 async function fetchRegistryTransactions(): Promise<AptosTransaction[]> {
     try {
-        const versions = await fetchIndexerRegisterVersions();
-        if (versions.length === 0) return fetchModuleAccountTransactions();
+        const versions = await fetchModuleTransactionVersions();
+        if (versions.length === 0) {
+            return scanState.transactions.length > 0
+                ? scanState.transactions
+                : fetchModuleAccountTransactions();
+        }
 
-        const indexerTransactions = await mapWithConcurrency(
-            versions,
-            TRANSACTION_FETCH_CONCURRENCY,
-            fetchTransactionByVersion
+        const freshVersions = versions.filter(
+            (version) => Number(version) > scanState.highestVersion
         );
-        const moduleTransactions = await fetchModuleAccountTransactions().catch(
-            () => []
-        );
-        const seenVersions = new Set<string>();
 
-        return [...indexerTransactions, ...moduleTransactions].filter((tx) => {
-            const version = tx.version?.toString();
-            if (!version) return true;
-            if (seenVersions.has(version)) return false;
-            seenVersions.add(version);
-            return true;
-        });
+        if (freshVersions.length === 0) {
+            console.info(
+                `Registry scan: ${versions.length} module tx(s), none new — reusing ${scanState.transactions.length} scanned tx(s), 0 REST calls.`
+            );
+            return scanState.transactions;
+        }
+
+        const listingVersions = await filterListingVersions(freshVersions);
+        const fetched =
+            listingVersions.length > 0
+                ? await mapWithConcurrency(
+                      listingVersions,
+                      TRANSACTION_FETCH_CONCURRENCY,
+                      fetchTransactionByVersion
+                  )
+                : [];
+
+        const highestSeen = versions.reduce<number>(
+            (max, version) => Math.max(max, Number(version)),
+            scanState.highestVersion
+        );
+
+        console.info(
+            `Registry scan: ${versions.length} module tx(s), ${freshVersions.length} new, ` +
+                `${listingVersions.length} fetched over REST.`
+        );
+
+        scanState = {
+            highestVersion: highestSeen,
+            transactions: [...fetched, ...scanState.transactions],
+        };
+
+        return scanState.transactions;
     } catch (error) {
         console.warn(
-            "Aptos indexer registry discovery failed; falling back to module account scan.",
+            "Aptos indexer registry discovery failed; falling back to what was already scanned.",
             error
         );
+
+        // Anything already scanned beats an empty marketplace, and costs nothing.
+        if (scanState.transactions.length > 0) return scanState.transactions;
         return fetchModuleAccountTransactions();
     }
 }
@@ -319,15 +451,27 @@ async function loadPrompts(force = false): Promise<PromptMetadata[]> {
         const registeredTarget = `${MODULE_ADDRESS}::prompt_registry::PromptRegistered`;
         const updatedTarget = `${MODULE_ADDRESS}::prompt_registry::PromptUpdated`;
         const deactivatedTarget = `${MODULE_ADDRESS}::prompt_registry::PromptDeactivated`;
+        const blobLinkedTarget = `${MODULE_ADDRESS}::prompt_registry::BlobLinked`;
         const txns = await fetchRegistryTransactions();
         const registered = new Map<string, PromptMetadata>();
         const deactivated = new Set<string>();
         const updatedPrices = new Map<string, number>();
+        const linkedBlobs = new Map<string, { blobId: string; contentHash: string }>();
 
         txns.flatMap((tx) => tx.events ?? []).forEach((event) => {
             if (event.type === deactivatedTarget) {
                 if (typeof event.data.prompt_id === "string") {
                     deactivated.add(event.data.prompt_id);
+                }
+                return;
+            }
+
+            if (event.type === blobLinkedTarget) {
+                if (typeof event.data.prompt_id === "string") {
+                    linkedBlobs.set(event.data.prompt_id, {
+                        blobId: String(event.data.blob_id ?? ""),
+                        contentHash: String(event.data.content_hash ?? ""),
+                    });
                 }
                 return;
             }
@@ -361,22 +505,59 @@ async function loadPrompts(force = false): Promise<PromptMetadata[]> {
                           ? "api-pay-per-call"
                           : "pay-per-unlock",
                 price: Number(event.data.price),
-                status: "active",
+                // Listings start unlinked and unsellable; a BlobLinked event
+                // (below) is what promotes them to active.
+                status: "inactive",
                 totalUnlocks: 0,
                 totalRevenue: 0,
                 tags: [],
                 createdAt: Number(event.data.timestamp) || 0,
                 updatedAt: Number(event.data.timestamp) || 0,
+                subscriptionPeriodSecs: Number(event.data.subscription_period_secs) || 0,
+                blobLinked: false,
             });
         });
 
+        // Events give us the set of listings that exist. Their *current* state
+        // (linked, price, active, unlock counts) can only come from the view
+        // function, because link_blob / update_price / deactivate_prompt never
+        // touch @exmarket and so never appear in the scanned transactions.
         const basePrompts = Array.from(registered.values())
             .filter((prompt) => !deactivated.has(prompt.promptId))
-            .map((prompt) => ({
-                ...prompt,
-                price: updatedPrices.get(prompt.promptId) ?? prompt.price,
-            }));
-        const prompts = await enrichRecentPrompts(basePrompts, !force);
+            .map((prompt) => {
+                const linked = linkedBlobs.get(prompt.promptId);
+
+                return {
+                    ...prompt,
+                    price: updatedPrices.get(prompt.promptId) ?? prompt.price,
+                    blobId: linked?.blobId ?? prompt.blobId,
+                    contentHash: linked?.contentHash ?? prompt.contentHash,
+                    blobLinked: Boolean(linked),
+                    status: linked ? ("active" as const) : ("inactive" as const),
+                };
+            });
+
+        const enriched = await enrichRecentPrompts(basePrompts, !force);
+
+        // Only list what can actually be bought. `status` here already folds in
+        // both halves of the on-chain is_prompt_active check (creator-active AND
+        // blob linked), which matters because a later deactivate_prompt never
+        // shows up in the scanned transactions either.
+        const prompts = enriched.filter(
+            (prompt) => prompt.status === "active" && prompt.blobLinked
+        );
+
+        const hiddenCount = enriched.length - prompts.length;
+        if (hiddenCount > 0) {
+            console.info(
+                `Registry: hiding ${hiddenCount} of ${enriched.length} listing(s) that are not purchasable (no Shelby blob linked, or deactivated).`
+            );
+        }
+        if (basePrompts.length > METADATA_ENRICH_LIMIT) {
+            console.warn(
+                `Registry: ${basePrompts.length} listings discovered but only the newest ${METADATA_ENRICH_LIMIT} were enriched; older listings are omitted.`
+            );
+        }
 
         cache = { prompts, timestamp: Date.now() };
         return prompts;

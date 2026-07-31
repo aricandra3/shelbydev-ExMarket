@@ -1,14 +1,20 @@
-/// Shelby SDK integration — blob upload and read operations
+/// Browser-side Shelby helpers.
 /// Docs: https://docs.shelby.xyz/sdks/typescript
-/// Networks: https://docs.shelby.xyz/protocol/architecture/networks
+///
+/// Neither uploads nor reads talk to Shelby directly from here: both go through
+/// our API routes so the project's SHELBY_API_KEY stays server-side and the
+/// storage and egress it pays for stay accounted for.
 ///
 /// ACE integration pattern:
-///   - Creator: aceEncrypt(content) → putEncryptedBlob({ ciphertext, domain })
-///   - Buyer:   readEncryptedBlob(blobId) → aceDecrypt(ciphertext, domain, proof)
+///   - Creator: aceEncrypt(content) → startEncryptedBlobUpload + finalizeUpload
+///   - Buyer:   readEncryptedBlob(promptId) → aceDecrypt(ciphertext, domain, proof)
+///
+/// What is still imported from the SDK is the erasure-coding maths the create
+/// flow needs to compute a blob's commitments before registering it on L1.
 
 import {
-    ShelbyClient,
     ShelbyBlobClient,
+    SHELBY_DEPLOYER,
     generateCommitments,
     ClayErasureCodingProvider,
     createDefaultErasureCodingProvider,
@@ -16,26 +22,23 @@ import {
     expectedTotalChunksets,
 } from "@shelby-protocol/sdk/browser";
 
-import { NETWORK } from "./constants";
+import { SHELBY_CONTRACT_ADDRESS } from "./constants";
 
-type PutBlobProgress = {
-    phase: "starting" | "uploading" | "finalizing" | "complete";
-    uploadedBytes: number;
-    totalBytes: number;
-};
+// The SDK decides where blobs are registered; our constant only mirrors it so
+// server code can read blob metadata without importing a browser bundle. If a
+// SDK upgrade moves the deployer, that mirror is silently wrong — and blobs
+// would look like they do not exist. Fail loudly instead.
+if (SHELBY_DEPLOYER.toString().toLowerCase() !== SHELBY_CONTRACT_ADDRESS.toLowerCase()) {
+    console.error(
+        `Shelby deployer mismatch: SDK registers blobs at ${SHELBY_DEPLOYER}, ` +
+            `but SHELBY_CONTRACT_ADDRESS is ${SHELBY_CONTRACT_ADDRESS}. ` +
+            "Update lib/constants.ts — blob metadata reads will return nothing until you do."
+    );
+}
 
 const SHELBY_COMPLETE_TIMEOUT_MS = 180_000;
 
-// ─────────────────────────────────────────────────
-// Shelby Client
-// ─────────────────────────────────────────────────
-
-const shelbyClient = new ShelbyClient({
-    network: NETWORK === "shelbynet" ? ("shelbynet" as any) : ("testnet" as any),
-});
-
 export {
-    shelbyClient,
     ShelbyBlobClient,
     generateCommitments,
     ClayErasureCodingProvider,
@@ -44,24 +47,58 @@ export {
     expectedTotalChunksets,
 };
 
-function parseBlobId(blobId: string) {
-    const trimmedBlobId = blobId.trim();
-    if (!trimmedBlobId || trimmedBlobId === "pending") {
-        throw new Error(
-            "Prompt content is not ready yet. The encrypted Shelby blob has not been linked on-chain."
-        );
-    }
+/// Signs the proof the upload endpoint requires. The wallet returns the exact
+/// string it signed (`fullMessage`, usually wrapped in its own preamble), so we
+/// forward that rather than what we asked for.
+export type UploadSigner = (message: string) => Promise<{
+    fullMessage: string;
+    signature: string;
+    publicKey: string;
+}>;
 
-    const [account, ...nameParts] = trimmedBlobId.split("/");
-    const blobName = nameParts.join("/").trim();
+const UPLOAD_PROOF_ACTION = "ExMarket Shelby upload";
 
-    if (!account || !blobName) {
-        throw new Error(
-            "Prompt content is unavailable because its Shelby blob reference is incomplete."
-        );
-    }
+function randomNonce() {
+    const bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    return Array.from(bytes)
+        .map((byte) => byte.toString(16).padStart(2, "0"))
+        .join("");
+}
 
-    return { account, blobName };
+export async function createUploadProof(
+    sign: UploadSigner,
+    account: string,
+    blobName: string
+): Promise<Record<string, string>> {
+    const timestamp = String(Date.now());
+    const nonce = randomNonce();
+    const message = [
+        UPLOAD_PROOF_ACTION,
+        `Account: ${account}`,
+        `Blob: ${blobName}`,
+        `Timestamp: ${timestamp}`,
+        `Nonce: ${nonce}`,
+    ].join("\n");
+
+    const signed = await sign(message);
+
+    // The signed message is multi-line; HTTP header values cannot hold newlines,
+    // so it travels base64-encoded and the server verifies the decoded bytes.
+    const messageBytes = new TextEncoder().encode(signed.fullMessage);
+    let binary = "";
+    messageBytes.forEach((byte) => {
+        binary += String.fromCharCode(byte);
+    });
+    const encodedMessage = btoa(binary);
+
+    return {
+        "X-Wallet-Public-Key": signed.publicKey,
+        "X-Wallet-Signature": signed.signature,
+        "X-Wallet-Message": encodedMessage,
+        "X-Wallet-Timestamp": timestamp,
+        "X-Wallet-Nonce": nonce,
+    };
 }
 
 async function fetchWithTimeout(init: RequestInit, timeoutMs: number, label: string) {
@@ -92,62 +129,7 @@ async function readErrorBody(response: Response) {
     }
 }
 
-async function uploadEncryptedBlobWithServerKey(
-    address: string,
-    blobName: string,
-    ciphertextHex: string,
-    domainHex: string,
-    onProgress?: (progress: PutBlobProgress) => void
-) {
-    const totalBytes = new TextEncoder().encode(
-        JSON.stringify({ ciphertextHex, domainHex })
-    ).length;
-
-    onProgress?.({
-        phase: "starting",
-        uploadedBytes: 0,
-        totalBytes,
-    });
-
-    onProgress?.({
-        phase: "uploading",
-        uploadedBytes: 0,
-        totalBytes,
-    });
-
-    onProgress?.({
-        phase: "finalizing",
-        uploadedBytes: totalBytes,
-        totalBytes,
-    });
-
-    const response = await fetchWithTimeout(
-        {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                account: address,
-                blobName,
-                ciphertextHex,
-                domainHex,
-            }),
-        },
-        SHELBY_COMPLETE_TIMEOUT_MS,
-        "Uploading encrypted content to Shelby"
-    );
-
-    if (!response.ok) {
-        throw new Error(
-            `Shelby upload failed. status: ${response.status}, body: ${await readErrorBody(response)}`
-        );
-    }
-
-    onProgress?.({
-        phase: "complete",
-        uploadedBytes: totalBytes,
-        totalBytes,
-    });
-}
+const SHELBY_START_TIMEOUT_MS = 60_000;
 
 // ─────────────────────────────────────────────────
 // Shelby Service
@@ -155,78 +137,115 @@ async function uploadEncryptedBlobWithServerKey(
 
 export const shelbyService = {
     /**
-     * Upload a prompt string as a blob to Shelby storage.
-     * Uses rpc.putBlob to avoid needing a raw private key —
-     * L1 registration is handled via wallet on the client side.
-     */
-    async putBlobDirectly(content: string, address: string, blobName: string): Promise<void> {
-        const blobData = new TextEncoder().encode(content);
-
-        await shelbyClient.rpc.putBlob({
-            account: address,
-            blobName,
-            blobData,
-        });
-    },
-
-    /**
-     * Read a prompt blob from Shelby storage.
-     * blobId format: "<account>/<blobName>"
-     */
-    async readPrompt(blobId: string): Promise<string> {
-        try {
-            if (blobId.startsWith("dummy_blob")) {
-                return "This is a dummy prompt content (upload failed or bypassed for testing).";
-            }
-
-            const { account, blobName } = parseBlobId(blobId);
-
-            const result = await shelbyClient.download({ account, blobName });
-            return await new Response(result.readable).text();
-        } catch (e) {
-            console.error("Failed to read blob", e);
-            return "Failed to load content from Shelby.";
-        }
-    },
-    /**
-     * Upload an ACE-encrypted prompt blob to Shelby.
+     * Transfer an ACE-encrypted prompt blob to Shelby, without finalizing it.
      * Stores a JSON payload: { ciphertextHex, domainHex }
      *
      * - ciphertextHex: hex-serialized ACE Ciphertext
      * - domainHex:     hex-serialized ACE FullDecryptionDomain (contractId + domain)
      *
-     * Call aceEncrypt() first to produce these values.
+     * Call aceEncrypt() first to produce these values, then finalizeUpload()
+     * with the returned uploadId. The split exists because finalizing takes
+     * ~10s of Shelby-side work, and the caller can spend that time collecting
+     * the publish signature instead of watching a spinner.
      */
-    async putEncryptedBlob(
+    async startEncryptedBlobUpload(
         ciphertextHex: string,
         domainHex: string,
         address: string,
         blobName: string,
-        onProgress?: (progress: PutBlobProgress) => void
-    ): Promise<void> {
-        await uploadEncryptedBlobWithServerKey(
-            address,
-            blobName,
-            ciphertextHex,
-            domainHex,
-            onProgress
+        proofHeaders: Record<string, string>
+    ): Promise<{ uploadId: string }> {
+        const response = await fetchWithTimeout(
+            {
+                method: "POST",
+                headers: { "Content-Type": "application/json", ...proofHeaders },
+                body: JSON.stringify({
+                    phase: "start",
+                    account: address,
+                    blobName,
+                    ciphertextHex,
+                    domainHex,
+                }),
+            },
+            SHELBY_START_TIMEOUT_MS,
+            "Uploading encrypted content to Shelby"
         );
+
+        if (!response.ok) {
+            throw new Error(
+                `Shelby upload failed. status: ${response.status}, body: ${await readErrorBody(response)}`
+            );
+        }
+
+        const { uploadId } = (await response.json()) as { uploadId?: string };
+        if (!uploadId) {
+            throw new Error("Shelby upload did not return an upload id.");
+        }
+
+        return { uploadId };
     },
 
     /**
-     * Read an ACE-encrypted prompt blob from Shelby.
-     * blobId format: "<account>/<blobName>"
+     * Finalize a transferred blob. This is the slow phase — Shelby erasure-codes
+     * the payload and distributes it to storage providers.
+     */
+    async finalizeUpload(
+        uploadId: string,
+        address: string,
+        blobName: string,
+        proofHeaders: Record<string, string>
+    ): Promise<void> {
+        const response = await fetchWithTimeout(
+            {
+                method: "POST",
+                headers: { "Content-Type": "application/json", ...proofHeaders },
+                body: JSON.stringify({
+                    phase: "complete",
+                    uploadId,
+                    account: address,
+                    blobName,
+                }),
+            },
+            SHELBY_COMPLETE_TIMEOUT_MS,
+            "Finalizing Shelby upload"
+        );
+
+        if (!response.ok) {
+            throw new Error(
+                `Shelby finalize failed. status: ${response.status}, body: ${await readErrorBody(response)}`
+            );
+        }
+    },
+
+    /**
+     * Read an ACE-encrypted prompt blob for a listing.
+     *
+     * Goes through /api/v1/shelby/blob rather than hitting Shelby directly, so
+     * the read is billed to this project's Shelby API key instead of being
+     * anonymous. The proxy resolves the blob path from on-chain metadata, which
+     * is why this takes a promptId and not a blob path.
      *
      * Returns { ciphertextHex, domainHex } ready to pass to aceDecrypt().
      */
-    async readEncryptedBlob(blobId: string): Promise<{
+    async readEncryptedBlob(promptId: string): Promise<{
         ciphertextHex: string;
         domainHex: string;
     }> {
-        const { account, blobName } = parseBlobId(blobId);
+        const response = await fetch(
+            `/api/v1/shelby/blob?promptId=${encodeURIComponent(promptId)}`,
+            { cache: "no-store" }
+        );
 
-        const result = await shelbyClient.download({ account, blobName });
-        const text = await new Response(result.readable).text();
+        if (!response.ok) {
+            const body = await response.json().catch(() => null);
+            throw new Error(
+                body && typeof body.error === "string"
+                    ? body.error
+                    : `Shelby read failed with status ${response.status}.`
+            );
+        }
+
+        const text = await response.text();
 
         let parsed: { ciphertextHex: string; domainHex: string };
         try {
