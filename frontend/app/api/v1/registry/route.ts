@@ -27,7 +27,7 @@ const METADATA_ENRICH_LIMIT = 80;
 const METADATA_ENRICH_CONCURRENCY = 2;
 const RATE_LIMIT_STATUS = 429;
 const APTOS_API_KEY = process.env.APTOS_API_KEY || "";
-const APTOS_API_ORIGIN = process.env.APTOS_API_ORIGIN || "http://localhost:3000";
+const APTOS_API_ORIGIN = process.env.APTOS_API_ORIGIN || "";
 
 type AptosEvent = {
     type: string;

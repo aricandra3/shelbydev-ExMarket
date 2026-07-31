@@ -8,7 +8,10 @@ import { warnAboutMisplacedKeys } from "./envCheck";
 
 const isCustomNetwork = NETWORK === "shelbynet";
 const APTOS_API_KEY = process.env.APTOS_API_KEY || "";
-const APTOS_API_ORIGIN = process.env.APTOS_API_ORIGIN || "http://localhost:3000";
+// Only set this for a Geomi *client* key, which is bound to one web app URL and
+// rejects a mismatched or missing Origin. A *server* key is not origin-bound and
+// wants no Origin header at all — hence no default here.
+const APTOS_API_ORIGIN = process.env.APTOS_API_ORIGIN || "";
 
 warnAboutMisplacedKeys([
     {
@@ -74,8 +77,9 @@ async function runView<T>(
             authFailureReported = true;
             console.error(
                 `Aptos rejected APTOS_API_KEY (HTTP ${(error as { status?: number }).status}) ` +
-                    `with Origin "${APTOS_API_ORIGIN}". Check the key and that this origin is ` +
-                    "allowed for it. Falling back to anonymous reads, which rate limit much sooner."
+                    `with Origin "${APTOS_API_ORIGIN || "(none)"}". A client key must be called ` +
+                    "with the exact origin it was registered for; a server key needs no origin. " +
+                    "Falling back to anonymous reads, which rate limit much sooner."
             );
         }
 
