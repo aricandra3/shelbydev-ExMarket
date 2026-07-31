@@ -4,10 +4,24 @@
 import { Aptos, AptosConfig, Network } from "@aptos-labs/ts-sdk";
 import { APTOS_INDEXER_URL, APTOS_NODE_URL, NETWORK } from "./constants";
 import { isRateLimitError } from "./utils";
+import { warnAboutMisplacedKeys } from "./envCheck";
 
 const isCustomNetwork = NETWORK === "shelbynet";
 const APTOS_API_KEY = process.env.APTOS_API_KEY || "";
 const APTOS_API_ORIGIN = process.env.APTOS_API_ORIGIN || "http://localhost:3000";
+
+warnAboutMisplacedKeys([
+    {
+        name: "APTOS_API_KEY",
+        value: APTOS_API_KEY,
+        purpose: "Aptos reads",
+    },
+    {
+        name: "SHELBY_API_KEY",
+        value: process.env.SHELBY_API_KEY || "",
+        purpose: "Shelby uploads and egress accounting",
+    },
+]);
 
 const config = new AptosConfig({
     network: isCustomNetwork ? Network.CUSTOM : Network.TESTNET,
