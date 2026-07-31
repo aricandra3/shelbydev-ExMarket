@@ -37,6 +37,52 @@ const config = new AptosConfig({
 
 export const aptosServerClient = new Aptos(config);
 
+/// Same node, no credentials. The REST paths in the registry route already fall
+/// back to anonymous when the key is rejected, which is why they kept working in
+/// production while every view call failed: the SDK path had no such fallback,
+/// so a bad key looked like "Aptos read request failed" and nothing else.
+const anonymousClient = new Aptos(
+    new AptosConfig({
+        network: isCustomNetwork ? Network.CUSTOM : Network.TESTNET,
+        fullnode: APTOS_NODE_URL,
+        indexer: APTOS_INDEXER_URL,
+    })
+);
+
+function isAuthError(error: unknown): boolean {
+    const status = (error as { status?: number })?.status;
+    return status === 401 || status === 403;
+}
+
+let authFailureReported = false;
+
+async function runView<T>(
+    payload: Parameters<typeof aptosServerClient.view>[0]["payload"]
+): Promise<T> {
+    if (!APTOS_API_KEY) {
+        return (await anonymousClient.view({ payload })) as T;
+    }
+
+    try {
+        return (await aptosServerClient.view({ payload })) as T;
+    } catch (error: unknown) {
+        if (!isAuthError(error)) throw error;
+
+        // Say it once, loudly: an unusable key is a configuration problem, and
+        // anonymous limits are far tighter than the key's.
+        if (!authFailureReported) {
+            authFailureReported = true;
+            console.error(
+                `Aptos rejected APTOS_API_KEY (HTTP ${(error as { status?: number }).status}) ` +
+                    `with Origin "${APTOS_API_ORIGIN}". Check the key and that this origin is ` +
+                    "allowed for it. Falling back to anonymous reads, which rate limit much sooner."
+            );
+        }
+
+        return (await anonymousClient.view({ payload })) as T;
+    }
+}
+
 const PROMPT_REGISTRY_VIEW_CACHE_TTL_MS = 60_000;
 const ACCESS_VIEW_CACHE_TTL_MS = 15_000;
 const MAX_CONCURRENT_VIEW_CALLS = 2;
@@ -131,12 +177,10 @@ export async function viewFunctionServer<T>(
 
     const promise = runLimitedView(() =>
         retryView(() =>
-            aptosServerClient.view({
-                payload: {
-                    function: functionName as `${string}::${string}::${string}`,
-                    functionArguments: args,
-                    typeArguments: typeArgs,
-                },
+            runView<T>({
+                function: functionName as `${string}::${string}::${string}`,
+                functionArguments: args,
+                typeArguments: typeArgs,
             })
         )
     );
