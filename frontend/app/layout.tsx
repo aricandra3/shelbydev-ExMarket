@@ -52,6 +52,33 @@ export const metadata: Metadata = {
         index: true,
         follow: true,
     },
+    icons: {
+        icon: "/favicon.svg",
+    },
+    alternates: {
+        canonical: "https://exmarket.vercel.app",
+    },
+};
+
+// JSON-LD Structured Data
+const jsonLd = {
+    "@context": "https://schema.org",
+    "@type": "WebSite",
+    name: "ExMarket",
+    url: "https://exmarket.vercel.app",
+    description:
+        "Decentralized pay-per-use AI prompt marketplace on Aptos + Shelby.",
+    potentialAction: {
+        "@type": "SearchAction",
+        target: "https://exmarket.vercel.app/explore?q={search_term_string}",
+        "query-input": "required name=search_term_string",
+    },
+    publisher: {
+        "@type": "Organization",
+        name: "ExMarket",
+        url: "https://exmarket.vercel.app",
+        logo: "https://exmarket.vercel.app/og-image.png",
+    },
 };
 
 export default function RootLayout({
@@ -61,6 +88,15 @@ export default function RootLayout({
 }) {
     return (
         <html lang="en" className={`dark ${inter.variable} ${outfit.variable} ${jetbrains.variable}`}>
+            <head>
+                {/* Preload critical resources */}
+                <link rel="preload" href="/assets/noise.png" as="image" type="image/png" />
+                <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+                <script
+                    type="application/ld+json"
+                    dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+                />
+            </head>
             <body className="relative flex min-h-screen flex-col overflow-x-hidden bg-retro-paper font-sans text-cream antialiased">
                 <div aria-hidden className="fixed inset-0 w-full h-full bg-noise mix-blend-overlay" />
                 <div
@@ -69,7 +105,9 @@ export default function RootLayout({
                 />
 
                 <div className="relative z-10 flex flex-col min-h-screen">
-                    <ClientShell>{children}</ClientShell>
+                    <main>
+                        <ClientShell>{children}</ClientShell>
+                    </main>
                 </div>
             </body>
         </html>
