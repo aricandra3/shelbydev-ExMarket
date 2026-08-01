@@ -62,7 +62,7 @@ const nextConfig = {
                             "style-src 'self' 'unsafe-inline'",
                             "img-src 'self' data: https: blob:",
                             "font-src 'self' data: https://fonts.gstatic.com",
-                            "connect-src 'self' https://fullnode.mainnet.aptoslabs.com https://api.testnet.aptoslabs.com https://api.shelby.xyz https://api.testnet.shelby.xyz https://*.shelby.xyz wss://*.shelby.xyz https://vercel.live wss://vercel.live",
+                            "connect-src 'self' https://fullnode.mainnet.aptoslabs.com https://api.testnet.aptoslabs.com https://api.shelby.xyz https://api.testnet.shelby.xyz https://*.shelby.xyz wss://*.shelby.xyz https://ace-worker-0-646682240579.europe-west1.run.app https://ace-worker-1-646682240579.europe-west1.run.app https://vercel.live wss://vercel.live",
                             "frame-src 'none'",
                             "base-uri 'self'",
                             "form-action 'self'",
