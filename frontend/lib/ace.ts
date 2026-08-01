@@ -59,7 +59,16 @@ export async function aceEncrypt(
     promptId: string
 ): Promise<{ ciphertextHex: string; domainHex: string }> {
     const encryptionKey = await ace.EncryptionKey.fetch({ committee: ACE_COMMITTEE });
-    const ek = encryptionKey.unwrapOrThrow("Failed to fetch ACE encryption key");
+    if (!encryptionKey.isOk) {
+        console.error("ACE encryption-key fetch failed:", {
+            error: encryptionKey.errValue,
+            details: encryptionKey.extra,
+        });
+        throw new Error(
+            `Failed to fetch ACE encryption key: ${errString(encryptionKey.errValue)}`
+        );
+    }
+    const ek = encryptionKey.okValue!;
 
     const domain = promptIdToDomain(promptId);
 
@@ -70,7 +79,14 @@ export async function aceEncrypt(
         plaintext: new TextEncoder().encode(plaintext),
     });
 
-    const { ciphertext, fullDecryptionDomain } = result.unwrapOrThrow("ACE encryption failed");
+    if (!result.isOk) {
+        console.error("ACE client-side encryption failed:", {
+            error: result.errValue,
+            details: result.extra,
+        });
+        throw new Error(`ACE encryption failed: ${errString(result.errValue)}`);
+    }
+    const { ciphertext, fullDecryptionDomain } = result.okValue!;
 
     return {
         ciphertextHex: ciphertext.toHex(),

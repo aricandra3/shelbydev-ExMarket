@@ -8,9 +8,12 @@ import { useParams } from "next/navigation";
 import { useAppWallet } from "@/components/wallet/walletContext";
 import { useAccessCheck } from "@/hooks/useAccessCheck";
 import { useUnlockPrompt } from "@/hooks/useUnlockPrompt";
+import { aceDecrypt, getSigningMessage } from "@/lib/ace";
 import { getPromptMetadata } from "@/lib/contracts";
 import { formatApt } from "@/lib/constants";
+import { shelbyService } from "@/lib/shelby";
 import { copyToClipboard, getErrorMessage, truncateAddress } from "@/lib/utils";
+import { Ed25519PublicKey, Ed25519Signature } from "@aptos-labs/ts-sdk";
 import type { PromptMetadata } from "@/types";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -131,15 +134,6 @@ export default function PromptDetailPage() {
             setDecryptError(null);
             try {
                 // 1. Fetch the encrypted blob from Shelby
-                const [
-                    { shelbyService },
-                    { aceDecrypt, getSigningMessage },
-                    { Ed25519PublicKey, Ed25519Signature },
-                ] = await Promise.all([
-                    import("@/lib/shelby"),
-                    import("@/lib/ace"),
-                    import("@aptos-labs/ts-sdk"),
-                ]);
                 const { ciphertextHex, domainHex } =
                     await shelbyService.readEncryptedBlob(promptId);
 
@@ -148,7 +142,10 @@ export default function PromptDetailPage() {
                 const signingMessage = getSigningMessage(domainHex);
                 const signResponse = await signMessage({
                     message: signingMessage,
-                    nonce: "",
+                    nonce: crypto.randomUUID(),
+                    address: true,
+                    application: true,
+                    chainId: true,
                 });
 
                 // 3. Convert wallet adapter key/sig to proper SDK class instances

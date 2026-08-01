@@ -17,30 +17,6 @@ const nextConfig = {
     experimental: {
         optimizePackageImports: ["lucide-react", "zustand"],
     },
-    webpack: (config, { isServer }) => {
-        // Split heavy SDKs into separate chunks
-        if (!isServer) {
-            config.optimization.splitChunks = {
-                ...config.optimization.splitChunks,
-                cacheGroups: {
-                    ...config.optimization.splitChunks?.cacheGroups,
-                    aptos: {
-                        test: /[\\/]node_modules[\\/]@aptos-labs[\\/]/,
-                        name: "aptos-sdk",
-                        chunks: "all",
-                        priority: 20,
-                    },
-                    shelby: {
-                        test: /[\\/]node_modules[\\/]@shelby-protocol[\\/]/,
-                        name: "shelby-sdk",
-                        chunks: "all",
-                        priority: 20,
-                    },
-                },
-            };
-        }
-        return config;
-    },
     async headers() {
         return [
             {
@@ -73,16 +49,6 @@ const nextConfig = {
             {
                 // Cache static assets aggressively
                 source: "/assets/(.*)",
-                headers: [
-                    {
-                        key: "Cache-Control",
-                        value: "public, max-age=31536000, immutable",
-                    },
-                ],
-            },
-            {
-                // Cache Next.js static files
-                source: "/_next/static/(.*)",
                 headers: [
                     {
                         key: "Cache-Control",

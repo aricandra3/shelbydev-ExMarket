@@ -16,6 +16,7 @@ import {
     invalidatePromptRegistryCache,
     rememberPromptInRegistry,
 } from "@/lib/promptRegistry";
+import { aceEncrypt } from "@/lib/ace";
 import { aptToOctas, PROMPT_CATEGORIES } from "@/lib/constants";
 import { PRICING_MODEL_REVERSE, SUBSCRIPTION_PERIODS } from "@/types";
 import type { PricingModel, SubscriptionPeriodKey } from "@/types";
@@ -183,7 +184,16 @@ export default function CreatePage() {
         // covers both upload phases.
         const proofHeaders = await createUploadProof(
             async (message) => {
-                const signed = await signMessage({ message, nonce: "" });
+                const signed = await signMessage({
+                    message,
+                    // Petra expects a real nonce for every message-signing
+                    // request. The upload proof has its own server-verified
+                    // nonce inside `message`; this one scopes the wallet UI.
+                    nonce: crypto.randomUUID(),
+                    address: true,
+                    application: true,
+                    chainId: true,
+                });
                 const rawSig = signed?.signature;
                 const rawPk = account?.publicKey;
                 if (!rawSig || !rawPk) {
@@ -342,7 +352,10 @@ export default function CreatePage() {
             return;
         }
 
+        let activeOperation = "preparing the publish";
+
         try {
+            activeOperation = "encrypting the prompt with ACE";
             setStep("encrypting");
             setRecovery(null);
             setStatusDetail("Deriving prompt address and encrypting with ACE...");
@@ -368,6 +381,7 @@ export default function CreatePage() {
             // function of (creator, seed). Computing it here is what lets ACE
             // encrypt against the real prompt id before anything is signed —
             // the old flow had to register on-chain first just to learn it.
+            activeOperation = "deriving the prompt address";
             const { AccountAddress, createObjectAddress } = await import(
                 "@aptos-labs/ts-sdk"
             );
@@ -383,12 +397,13 @@ export default function CreatePage() {
             setStatusDetail("Encrypting prompt content with ACE...");
 
             const blobName = `prompt_${Date.now()}.txt`;
-            const { aceEncrypt } = await import("@/lib/ace");
+            activeOperation = "fetching the ACE encryption key";
             const { ciphertextHex, domainHex } = await aceEncrypt(content, promptId);
             const encryptedPayload = JSON.stringify({ ciphertextHex, domainHex });
             const uploadBytes = new TextEncoder().encode(encryptedPayload);
 
             // ─── PHASE 3: Generate Shelby commitments from encrypted bytes ────
+            activeOperation = "building Shelby storage commitments";
             const {
                 createDefaultErasureCodingProvider,
                 generateCommitments,
@@ -410,6 +425,7 @@ export default function CreatePage() {
             setStep("registering-blob");
             setStatusDetail("Waiting for wallet signature for tx 1: register Shelby blob...");
 
+            activeOperation = "creating the Shelby registration transaction";
             const shelbyPayload = ShelbyBlobClient.createRegisterBlobPayload({
                 account: AccountAddress.fromString(accountAddress),
                 blobName,
@@ -420,6 +436,7 @@ export default function CreatePage() {
                 encoding: erasureCodingConfig.enumIndex,
             });
 
+            activeOperation = "opening Petra for the Shelby registration";
             const shelbyResponse = await signAndSubmitTransaction({ data: shelbyPayload });
             const recoveryData: PublishRecovery = {
                 promptId,
@@ -454,7 +471,10 @@ export default function CreatePage() {
 
             await finalizePublish(recoveryData);
         } catch (err: unknown) {
-            setError(getErrorMessage(err, "Something went wrong while publishing."));
+            console.error(`Publish failed while ${activeOperation}:`, err);
+            setError(
+                `${activeOperation}: ${getErrorMessage(err, "Something went wrong while publishing.")}`
+            );
             setStep("error");
         }
     };
