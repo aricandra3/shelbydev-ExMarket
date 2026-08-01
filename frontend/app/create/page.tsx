@@ -58,6 +58,8 @@ type PublishRecovery = {
     ciphertextHex: string;
     domainHex: string;
     accountAddress: string;
+    /** Submitted tx 1. Retrying confirms this exact transaction instead of registering another blob. */
+    registerTxHash: string;
     /** sha-256 of the exact bytes uploaded to Shelby, pinned on-chain at publish time. */
     contentHash: Uint8Array;
     listing: {
@@ -154,8 +156,17 @@ export default function CreatePage() {
     }, [isBusy, step]);
     const submitLabel =
         step === "error" && recovery
-            ? "Retry Finalize Upload"
+            ? "Resume Publish Safely"
             : PUBLISH_STEP_LABELS[step];
+
+    const confirmRegisteredBlob = async (publish: PublishRecovery) => {
+        setStep("registering-blob");
+        setStatusDetail("Confirming the existing Shelby registration transaction...");
+        await waitForTransaction(publish.registerTxHash, {
+            checkSuccess: true,
+            waitForIndexer: true,
+        });
+    };
 
     const finalizePublish = async (publish: PublishRecovery) => {
         if (!accountAddress || publish.accountAddress !== accountAddress) {
@@ -305,6 +316,7 @@ export default function CreatePage() {
         setError("");
         if (step === "error" && recovery) {
             try {
+                await confirmRegisteredBlob(recovery);
                 await finalizePublish(recovery);
             } catch (err: unknown) {
                 setError(getErrorMessage(err, "Could not finish publishing."));
@@ -409,17 +421,6 @@ export default function CreatePage() {
             });
 
             const shelbyResponse = await signAndSubmitTransaction({ data: shelbyPayload });
-            setStatusDetail("Confirming tx 1 and waiting for Shelby indexer...");
-            await waitForTransaction(shelbyResponse.hash, {
-                checkSuccess: true,
-                waitForIndexer: true,
-            });
-
-            // No fixed wait here: the upload route already retries while Shelby
-            // reports the blob as "not registered", so sleeping first only adds
-            // dead time to a step the user is watching.
-            setStatusDetail("Preparing Shelby RPC upload...");
-
             const recoveryData: PublishRecovery = {
                 promptId,
                 seed,
@@ -427,6 +428,7 @@ export default function CreatePage() {
                 ciphertextHex,
                 domainHex,
                 accountAddress,
+                registerTxHash: shelbyResponse.hash,
                 contentHash: await sha256(uploadBytes),
                 listing: {
                     title,
@@ -438,7 +440,18 @@ export default function CreatePage() {
                     subscriptionPeriodSecs,
                 },
             };
+            // Save recovery immediately after signing tx 1. If confirmation is
+            // interrupted, retrying verifies this tx rather than creating a
+            // second (orphaned) registered blob.
             setRecovery(recoveryData);
+            setStatusDetail("Confirming tx 1 and waiting for Shelby indexer...");
+            await confirmRegisteredBlob(recoveryData);
+
+            // No fixed wait here: the upload route already retries while Shelby
+            // reports the blob as "not registered", so sleeping first only adds
+            // dead time to a step the user is watching.
+            setStatusDetail("Preparing Shelby RPC upload...");
+
             await finalizePublish(recoveryData);
         } catch (err: unknown) {
             setError(getErrorMessage(err, "Something went wrong while publishing."));
@@ -497,7 +510,7 @@ export default function CreatePage() {
                                         Your prompt is now live on the marketplace.
                                     </p>
                                     {txHash && (
-                                        <p className="mb-6 break-all font-mono text-xs text-cream/35">
+                                        <p className="mb-6 break-all font-mono text-xs text-cream/60">
                                             tx: {txHash}
                                         </p>
                                     )}
@@ -508,14 +521,15 @@ export default function CreatePage() {
                             </div>
                         ) : (
                             <div className="animate-fade-in">
-                                <form onSubmit={handleSubmit} className="space-y-6">
+                                <form onSubmit={handleSubmit} className="space-y-6" aria-busy={isBusy}>
                                     <Card className="space-y-5 p-8">
                                         {/* Title */}
                                         <div>
-                                            <label className="mb-2 block text-xs font-black uppercase tracking-widest text-cream/65">
+                                            <label htmlFor="prompt-title" className="mb-2 block text-xs font-black uppercase tracking-widest text-cream/65">
                                                 Title
                                             </label>
                                             <Input
+                                                id="prompt-title"
                                                 type="text"
                                                 required
                                                 minLength={2}
@@ -528,10 +542,11 @@ export default function CreatePage() {
 
                                         {/* Description */}
                                         <div>
-                                            <label className="mb-2 block text-xs font-black uppercase tracking-widest text-cream/65">
+                                            <label htmlFor="prompt-description" className="mb-2 block text-xs font-black uppercase tracking-widest text-cream/65">
                                                 Description
                                             </label>
                                             <Textarea
+                                                id="prompt-description"
                                                 required
                                                 maxLength={MAX_DESCRIPTION_LENGTH}
                                                 rows={3}
@@ -545,10 +560,11 @@ export default function CreatePage() {
 
                                         {/* Category */}
                                         <div>
-                                            <label className="mb-2 block text-xs font-black uppercase tracking-widest text-cream/65">
+                                            <label htmlFor="prompt-category" className="mb-2 block text-xs font-black uppercase tracking-widest text-cream/65">
                                                 Category
                                             </label>
                                             <select
+                                                id="prompt-category"
                                                 className="input-field"
                                                 value={form.category}
                                                 onChange={(e) => setForm({ ...form, category: e.target.value })}
@@ -563,10 +579,11 @@ export default function CreatePage() {
 
                                         {/* Tags */}
                                         <div>
-                                            <label className="mb-2 block text-xs font-black uppercase tracking-widest text-cream/65">
+                                            <label htmlFor="prompt-tags" className="mb-2 block text-xs font-black uppercase tracking-widest text-cream/65">
                                                 Tags (comma-separated)
                                             </label>
                                             <Input
+                                                id="prompt-tags"
                                                 type="text"
                                                 maxLength={MAX_TAGS_LENGTH}
                                                 placeholder="e.g. seo, blog, marketing"
@@ -577,9 +594,9 @@ export default function CreatePage() {
 
                                         {/* Pricing Model */}
                                         <div>
-                                            <label className="mb-2 block text-xs font-black uppercase tracking-widest text-cream/65">
+                                            <p className="mb-2 text-xs font-black uppercase tracking-widest text-cream/65">
                                                 Pricing Model
-                                            </label>
+                                            </p>
                                             <div className="grid grid-cols-3 gap-3">
                                                 {(
                                                     [
@@ -600,7 +617,7 @@ export default function CreatePage() {
                                                             }
                                                             className={`min-h-24 rounded-[7px] border-2 p-3 text-center text-xs font-black uppercase tracking-wide transition-all ${isActive
                                                                 ? "border-ink bg-retro-cyan text-ink shadow-neo-sm"
-                                                                : "border-cream/20 bg-cream/[0.05] text-cream/45 hover:border-cream/60 hover:text-cream"
+                                                                : "border-cream/20 bg-cream/[0.05] text-cream/60 hover:border-cream/60 hover:text-cream"
                                                                 }`}
                                                         >
                                                             <Icon className="mx-auto mb-2 h-5 w-5" />
@@ -614,10 +631,11 @@ export default function CreatePage() {
                                         {/* Billing period — subscriptions only */}
                                         {form.pricingModel === "subscription" && (
                                             <div>
-                                                <label className="mb-2 block text-xs font-black uppercase tracking-widest text-cream/65">
+                                                <label htmlFor="subscription-period" className="mb-2 block text-xs font-black uppercase tracking-widest text-cream/65">
                                                     Billing Period
                                                 </label>
                                                 <select
+                                                    id="subscription-period"
                                                     className="input-field"
                                                     value={form.subscriptionPeriod}
                                                     onChange={(e) =>
@@ -634,7 +652,7 @@ export default function CreatePage() {
                                                         </option>
                                                     ))}
                                                 </select>
-                                                <p className="mt-2 text-xs font-semibold text-cream/35">
+                                                <p className="mt-2 text-xs font-semibold text-cream/60">
                                                     The price below buys exactly one period. Buyers
                                                     choose how many periods to pay for — they cannot
                                                     set their own duration.
@@ -644,7 +662,7 @@ export default function CreatePage() {
 
                                         {/* Price */}
                                         <div>
-                                            <label className="mb-2 block text-xs font-black uppercase tracking-widest text-cream/65">
+                                            <label htmlFor="prompt-price" className="mb-2 block text-xs font-black uppercase tracking-widest text-cream/65">
                                                 {form.pricingModel === "subscription"
                                                     ? "Price per Period (APT)"
                                                     : form.pricingModel === "api-pay-per-call"
@@ -652,6 +670,7 @@ export default function CreatePage() {
                                                       : "Price (APT)"}
                                             </label>
                                             <Input
+                                                id="prompt-price"
                                                 type="number"
                                                 required
                                                 min="0.001"
@@ -666,10 +685,11 @@ export default function CreatePage() {
 
                                     {/* Prompt Content */}
                                     <Card className="p-8">
-                                        <label className="mb-2 block text-xs font-black uppercase tracking-widest text-cream/65">
+                                        <label htmlFor="prompt-content" className="mb-2 block text-xs font-black uppercase tracking-widest text-cream/65">
                                             Prompt Content
                                         </label>
                                         <Textarea
+                                            id="prompt-content"
                                             required
                                             maxLength={MAX_CONTENT_LENGTH}
                                             rows={12}
@@ -678,7 +698,7 @@ export default function CreatePage() {
                                             value={form.content}
                                             onChange={(e) => setForm({ ...form, content: e.target.value })}
                                         />
-                                        <p className="mt-3 text-xs font-semibold text-cream/35">
+                                        <p className="mt-3 text-xs font-semibold text-cream/60">
                                             This content is stored on Shelby decentralized storage. It will only
                                             be accessible to users who pay to unlock it.
                                         </p>
@@ -695,10 +715,10 @@ export default function CreatePage() {
                                     </Button>
 
                                     {isBusy && statusDetail && (
-                                        <p className="text-center text-xs font-semibold text-cream/45">
+                                        <p role="status" aria-live="polite" className="text-center text-xs font-semibold text-cream/60">
                                             {statusDetail}
                                             {stepStartedAt !== null && elapsedSecs > 2 && (
-                                                <span className="ml-1 font-mono text-cream/35">
+                                                <span className="ml-1 font-mono text-cream/60">
                                                     ({elapsedSecs}s)
                                                 </span>
                                             )}
@@ -706,14 +726,14 @@ export default function CreatePage() {
                                     )}
 
                                     {error && (
-                                        <p className="text-center text-sm font-semibold text-accent-red">
+                                        <p role="alert" className="text-center text-sm font-semibold text-accent-red">
                                             {error}
                                         </p>
                                     )}
 
                                     {step === "error" && recovery && (
-                                        <p className="text-center text-xs font-semibold text-cream/40">
-                                            The Shelby blob is already registered on-chain. Retry resumes from the upload and the publish tx only.
+                                        <p className="text-center text-xs font-semibold text-cream/60">
+                                            Your existing Shelby registration will be verified before the upload resumes. No new blob registration will be submitted.
                                         </p>
                                     )}
                                 </form>
@@ -724,7 +744,7 @@ export default function CreatePage() {
                 {/* Right side Start - Live Preview */}
                 <div className="hidden lg:block relative">
                     <div className="sticky top-24 ml-auto mr-12 max-w-md">
-                        <h3 className="mb-6 flex items-center justify-center gap-2 text-center text-xs font-black uppercase tracking-widest text-cream/45">
+                        <h3 className="mb-6 flex items-center justify-center gap-2 text-center text-xs font-black uppercase tracking-widest text-cream/60">
                             <Eye className="h-4 w-4" />
                             Live Preview
                         </h3>
@@ -738,7 +758,7 @@ export default function CreatePage() {
                                         <div className="whitespace-nowrap text-2xl font-black leading-none text-retro-yellow">
                                             {form.price || "0"} APT
                                         </div>
-                                        <div className="mt-1 max-w-32 truncate text-xs font-black uppercase tracking-wide text-cream/45">
+                                        <div className="mt-1 max-w-32 truncate text-xs font-black uppercase tracking-wide text-cream/60">
                                             {form.pricingModel.replace(/-/g, " ")}
                                         </div>
                                     </div>
@@ -770,7 +790,7 @@ export default function CreatePage() {
                                 </div>
 
                                 <div className="flex items-center justify-between gap-3 border-t border-cream/15 pt-4">
-                                    <span className="min-w-0 truncate font-mono text-xs text-cream/45">
+                                    <span className="min-w-0 truncate font-mono text-xs text-cream/60">
                                         by {accountAddress
                                             ? `${accountAddress.substring(0, 6)}...${accountAddress.substring(accountAddress.length - 4)}`
                                             : "you"}

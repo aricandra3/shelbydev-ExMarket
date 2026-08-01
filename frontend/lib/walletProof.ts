@@ -19,34 +19,17 @@ import {
     Ed25519PublicKey,
     Ed25519Signature,
 } from "@aptos-labs/ts-sdk";
+import { reserveOnce } from "./durableStore";
 
 const PROOF_MAX_AGE_MS = 5 * 60 * 1000;
 const PROOF_CLOCK_SKEW_MS = 30 * 1000;
 
-/// Replay protection. In-memory, so it does not span serverless instances or
-/// survive a cold start — a durable store (Redis/KV) is the fix if this has to
-/// hold under horizontal scale. Same caveat as the rate limiter.
-const seenNonces = new Map<string, number>();
-
-function cleanupExpiredNonces(now: number) {
-    if (seenNonces.size < 1_000) return;
-
-    Array.from(seenNonces.entries()).forEach(([key, expiresAt]) => {
-        if (expiresAt <= now) seenNonces.delete(key);
-    });
-}
-
 /// Returns false when this nonce was already used for the same scope.
-export function consumeNonce(scope: string, nonce: string) {
-    const now = Date.now();
-    cleanupExpiredNonces(now);
-
-    const key = `${scope}:${nonce}`;
-    const existing = seenNonces.get(key);
-    if (existing && existing > now) return false;
-
-    seenNonces.set(key, now + PROOF_MAX_AGE_MS + PROOF_CLOCK_SKEW_MS);
-    return true;
+export async function consumeNonce(scope: string, nonce: string) {
+    return reserveOnce(
+        `exmarket:nonce:${scope}:${nonce}`,
+        Math.ceil((PROOF_MAX_AGE_MS + PROOF_CLOCK_SKEW_MS) / 1_000)
+    );
 }
 
 export type WalletProofHeaders = {
@@ -140,13 +123,13 @@ export type WalletProofResult =
 
 /// Verify that the caller controls `walletAddress` and signed for exactly this
 /// action and bindings. `scope` namespaces the replay cache.
-export function verifyWalletProof(params: {
+export async function verifyWalletProof(params: {
     headers: Headers;
     walletAddress: string;
     action: string;
     bindings: Array<[string, string]>;
     scope: string;
-}): WalletProofResult {
+}): Promise<WalletProofResult> {
     const { headers, action, bindings, scope } = params;
     const proof = readWalletProofHeaders(headers);
 
@@ -243,7 +226,7 @@ export function verifyWalletProof(params: {
         };
     }
 
-    if (!consumeNonce(`${scope}:${walletAddress}`, nonce)) {
+    if (!(await consumeNonce(`${scope}:${walletAddress}`, nonce))) {
         return {
             ok: false,
             error: "Wallet proof nonce has already been used",

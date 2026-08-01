@@ -23,7 +23,7 @@ import { checkRateLimit, rateLimitHeaders } from "@/lib/apiSecurity";
 export const runtime = "nodejs";
 
 export async function GET(req: NextRequest) {
-    const rateLimit = checkRateLimit(req.headers, {
+    const rateLimit = await checkRateLimit(req.headers, {
         namespace: "api-shelby-blob",
         limit: 60,
         windowMs: 60_000,

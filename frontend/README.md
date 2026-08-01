@@ -29,8 +29,9 @@ Fill in your values. See the [root README](../README.md) for full environment va
 | `NEXT_PUBLIC_SHELBY_RPC_URL` | Shelby RPC endpoint |
 | `NEXT_PUBLIC_MODULE_ADDRESS` | Deployed ExMarket contract address |
 | `APTOS_API_KEY` | Server-side Aptos/Shelby API key |
-| `APTOS_API_ORIGIN` | Origin allowed by the Aptos API key, e.g. `http://localhost:3000` |
+| `APTOS_API_ORIGIN` | Only for a Geomi client key; leave unset for a Server key |
 | `SHELBY_API_KEY` | Server-side Shelby API key (secret) |
+| `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` | Redis REST credentials required for durable rate limits, proof nonces, and upload state |
 
 ## Shelby SDK
 

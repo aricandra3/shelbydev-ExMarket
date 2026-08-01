@@ -42,7 +42,7 @@ function isStringArray(value: unknown): value is string[] {
 }
 
 export async function POST(req: NextRequest) {
-    const rateLimit = checkRateLimit(req.headers, {
+    const rateLimit = await checkRateLimit(req.headers, {
         namespace: "api-view",
         limit: 240,
         windowMs: 60_000,

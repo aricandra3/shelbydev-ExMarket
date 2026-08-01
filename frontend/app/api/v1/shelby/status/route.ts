@@ -77,7 +77,7 @@ async function statusFor(promptId: string): Promise<StatusEntry> {
 }
 
 export async function GET(req: NextRequest) {
-    const rateLimit = checkRateLimit(req.headers, {
+    const rateLimit = await checkRateLimit(req.headers, {
         namespace: "api-shelby-status",
         limit: 60,
         windowMs: 60_000,

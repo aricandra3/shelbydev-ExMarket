@@ -104,7 +104,7 @@ async function verifyConsumeTx(
     }
 
     // One served response per consume transaction.
-    if (!consumeNonce(`consume-tx:${walletAddress}:${promptId}`, txHash)) {
+    if (!(await consumeNonce(`consume-tx:${walletAddress}:${promptId}`, txHash))) {
         return "X-Consume-Tx has already been used for a response";
     }
 
@@ -112,7 +112,7 @@ async function verifyConsumeTx(
 }
 
 export async function GET(req: NextRequest, { params }: PromptRouteContext) {
-    const rateLimit = checkRateLimit(req.headers, {
+    const rateLimit = await checkRateLimit(req.headers, {
         namespace: "api-prompt",
         limit: 30,
         windowMs: 60_000,
@@ -161,7 +161,7 @@ export async function GET(req: NextRequest, { params }: PromptRouteContext) {
     }
 
     try {
-        const proof = verifyWalletProof({
+        const proof = await verifyWalletProof({
             headers: req.headers,
             walletAddress: normalizedWalletAddress,
             action: PROOF_ACTION,

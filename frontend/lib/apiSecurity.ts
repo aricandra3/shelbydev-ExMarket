@@ -1,7 +1,4 @@
-type RateLimitBucket = {
-    count: number;
-    resetAt: number;
-};
+import { incrementWithExpiry } from "./durableStore";
 
 type RateLimitOptions = {
     namespace: string;
@@ -17,18 +14,6 @@ type RateLimitResult = {
     retryAfterSeconds: number;
 };
 
-const rateLimitBuckets = new Map<string, RateLimitBucket>();
-
-function cleanupExpiredBuckets(now: number) {
-    if (rateLimitBuckets.size < 1_000) return;
-
-    Array.from(rateLimitBuckets.entries()).forEach(([key, bucket]) => {
-        if (bucket.resetAt <= now) {
-            rateLimitBuckets.delete(key);
-        }
-    });
-}
-
 export function getClientIdentifier(headers: Headers) {
     const forwardedFor = headers.get("x-forwarded-for");
     const firstForwardedIp = forwardedFor?.split(",")[0]?.trim();
@@ -41,38 +26,33 @@ export function getClientIdentifier(headers: Headers) {
     );
 }
 
-export function checkRateLimit(
+export async function checkRateLimit(
     headers: Headers,
     { namespace, limit, windowMs }: RateLimitOptions
-): RateLimitResult {
+): Promise<RateLimitResult> {
     const now = Date.now();
-    cleanupExpiredBuckets(now);
-
     const key = `${namespace}:${getClientIdentifier(headers)}`;
-    let bucket = rateLimitBuckets.get(key);
+    const { count, ttlSeconds } = await incrementWithExpiry(
+        key,
+        Math.ceil(windowMs / 1_000)
+    );
+    const resetAt = now + ttlSeconds * 1_000;
 
-    if (!bucket || bucket.resetAt <= now) {
-        bucket = { count: 0, resetAt: now + windowMs };
-        rateLimitBuckets.set(key, bucket);
-    }
-
-    if (bucket.count >= limit) {
+    if (count > limit) {
         return {
             limited: true,
             limit,
             remaining: 0,
-            resetAt: bucket.resetAt,
-            retryAfterSeconds: Math.max(1, Math.ceil((bucket.resetAt - now) / 1000)),
+            resetAt,
+            retryAfterSeconds: ttlSeconds,
         };
     }
-
-    bucket.count += 1;
 
     return {
         limited: false,
         limit,
-        remaining: Math.max(0, limit - bucket.count),
-        resetAt: bucket.resetAt,
+        remaining: Math.max(0, limit - count),
+        resetAt,
         retryAfterSeconds: 0,
     };
 }

@@ -8,10 +8,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 
 // ── Data ──────────────────────────────────────────────────
-const STATS = [
-    { value: "2,400+", label: "Prompts listed" },
-    { value: "180+", label: "Creators" },
-    { value: "Aptos", label: "Chain" },
+const HIGHLIGHTS = [
+    { value: "ACE", label: "Wallet-gated encryption" },
+    { value: "Shelby", label: "Encrypted storage" },
+    { value: "Aptos", label: "On-chain payments" },
 ];
 
 const FEATURES = [
@@ -22,8 +22,8 @@ const FEATURES = [
     },
     {
         icon: ShieldCheck,
-        title: "On-chain ownership",
-        body: "Listings keep a permanent record through Shelby and Aptos without hiding the creator trail.",
+        title: "Verifiable access",
+        body: "Aptos records listing and payment state, while encrypted content is stored on Shelby for its selected lease period.",
     },
     {
         icon: Coins,
@@ -81,15 +81,15 @@ export default function HomePage() {
                         </div>
 
                         <div className="grid max-w-2xl grid-cols-3 overflow-hidden rounded-[8px] border-2 border-ink bg-cream/[0.08] shadow-neo backdrop-blur-xl">
-                            {STATS.map((s, index) => (
+                            {HIGHLIGHTS.map((s, index) => (
                                 <div key={s.label} className="p-4">
                                     <span className="block text-2xl font-black text-retro-yellow tabular-nums">
                                         {s.value}
                                     </span>
-                                    <span className="text-[10px] font-black uppercase tracking-widest text-cream/50">
+                                    <span className="text-[10px] font-black uppercase tracking-widest text-cream/60">
                                         {s.label}
                                     </span>
-                                    {index < STATS.length - 1 && (
+                                    {index < HIGHLIGHTS.length - 1 && (
                                         <Separator orientation="vertical" className="absolute hidden" />
                                     )}
                                 </div>
@@ -152,7 +152,7 @@ export default function HomePage() {
                                         <div className="flex h-12 w-12 items-center justify-center rounded-[7px] border-2 border-ink bg-retro-yellow text-ink shadow-neo-sm transition-transform group-hover:rotate-3">
                                             <f.icon className="h-6 w-6" />
                                         </div>
-                                        <span className="font-mono text-xs font-black text-cream/35">
+                                        <span className="font-mono text-xs font-black text-cream/60">
                                             0{i + 1}
                                         </span>
                                     </div>

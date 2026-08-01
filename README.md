@@ -42,7 +42,7 @@ The contracts enforce the marketplace rules rather than relying on the UI:
 Run the test suite:
 
 ```bash
-cd contracts && aptos move test --named-addresses exmarket=default
+cd contracts && aptos move test --skip-fetch-latest-git-deps
 ```
 
 ## Storage lifetime
@@ -112,9 +112,9 @@ publishing account **is** the admin account — `initialize` rejects anyone else
 
 ```bash
 cd contracts
-aptos move test --named-addresses exmarket=default
-aptos move compile --named-addresses exmarket=default
-aptos move publish --named-addresses exmarket=default
+aptos move test --skip-fetch-latest-git-deps
+aptos move compile
+aptos move publish
 
 # Initialize modules (must be signed by the publishing account)
 aptos move run --function-id default::prompt_registry::initialize \
@@ -157,8 +157,9 @@ See [`frontend/.env.example`](frontend/.env.example) for the full list. Key vari
 | `NEXT_PUBLIC_NETWORK` | `testnet` or `shelbynet` |
 | `NEXT_PUBLIC_MODULE_ADDRESS` | Deployed ExMarket contract address |
 | `APTOS_API_KEY` | Server-side Aptos/Shelby API key |
-| `APTOS_API_ORIGIN` | Origin allowed by your Aptos API key |
+| `APTOS_API_ORIGIN` | Only for a Geomi client key; leave unset for a Server key |
 | `SHELBY_API_KEY` | Server-side Shelby API key. Also what egress is billed against — reads go through `/api/v1/shelby/blob`, never straight from the browser. |
+| `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` | Redis REST credentials required to share rate limits, proof nonces, and upload state across Vercel instances |
 
 ### Network Presets
 

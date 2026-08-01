@@ -124,7 +124,7 @@ export default function DashboardPage() {
                             <div className={`text-3xl font-black ${stat.color}`}>
                                 {stat.value}
                             </div>
-                            <div className="mt-2 text-[10px] font-black uppercase tracking-widest text-cream/45">
+                            <div className="mt-2 text-[10px] font-black uppercase tracking-widest text-cream/60">
                                 {stat.label}
                             </div>
                         </Card>
@@ -149,7 +149,7 @@ export default function DashboardPage() {
                     </div>
                 ) : prompts.length === 0 ? (
                     <div className="p-12 text-center">
-                        <p className="mb-5 font-semibold text-cream/50">
+                        <p className="mb-5 font-semibold text-cream/60">
                             You haven't created any prompts yet.
                         </p>
                         <Link href="/create" className={buttonVariants()}>
@@ -190,7 +190,7 @@ export default function DashboardPage() {
                                             <div className="text-sm font-black text-accent-green">
                                                 {formatApt(prompt.totalRevenue)}
                                             </div>
-                                            <div className="text-xs font-semibold text-cream/35">
+                                            <div className="text-xs font-semibold text-cream/60">
                                                 {prompt.totalUnlocks} unlocks
                                             </div>
                                         </div>

@@ -335,7 +335,7 @@ export default function LibraryPage() {
               <h1 className="section-title">
                 My Library
               </h1>
-              <p className="mt-3 text-sm font-semibold text-cream/50">
+              <p className="mt-3 text-sm font-semibold text-cream/60">
                 {loading ? "Loading your collection…" : `${filtered.length} prompt${filtered.length !== 1 ? "s" : ""} unlocked`}
               </p>
             </div>
@@ -343,7 +343,7 @@ export default function LibraryPage() {
             {/* Search bar */}
             {!loading && prompts.length > 0 && (
               <div className="relative sm:w-72">
-                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-cream/35" />
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-cream/60" />
                 <Input
                   type="text"
                   value={search}
@@ -368,7 +368,7 @@ export default function LibraryPage() {
                   onClick={() => setActiveCategory(cat)}
                   className={`min-h-11 rounded-[7px] border-2 px-3.5 py-2 text-xs font-black uppercase tracking-wide transition-all duration-150 ${isActive
                     ? "border-ink bg-retro-yellow text-ink shadow-neo-sm"
-                    : "border-cream/15 bg-cream/[0.04] text-cream/45 hover:border-cream/50 hover:text-cream"
+                    : "border-cream/15 bg-cream/[0.04] text-cream/60 hover:border-cream/60 hover:text-cream"
                     }`}
                 >
                   {cat !== "All" && accent ? `${accent.icon} ` : ""}
@@ -458,22 +458,22 @@ export default function LibraryPage() {
             <div className="flex flex-wrap gap-6">
               <div>
                 <p className="text-2xl font-black text-retro-yellow">{prompts.length}</p>
-                <p className="font-mono text-[10px] uppercase tracking-widest text-cream/35">Total Prompts</p>
+                <p className="font-mono text-[10px] uppercase tracking-widest text-cream/60">Total Prompts</p>
               </div>
               <div>
                 <p className="text-2xl font-black text-retro-cyan">{categories.length - 1}</p>
-                <p className="font-mono text-[10px] uppercase tracking-widest text-cream/35">Categories</p>
+                <p className="font-mono text-[10px] uppercase tracking-widest text-cream/60">Categories</p>
               </div>
               <div>
                 <p className="text-2xl font-black text-retro-mint">
                   {formatApt(prompts.reduce((sum, p) => sum + p.price, 0))}
                 </p>
-                <p className="font-mono text-[10px] uppercase tracking-widest text-cream/35">Total Value (APT)</p>
+                <p className="font-mono text-[10px] uppercase tracking-widest text-cream/60">Total Value (APT)</p>
               </div>
             </div>
             <Link
               href="/explore"
-              className="inline-flex items-center gap-1.5 text-xs font-black uppercase tracking-wide text-cream/45 transition-colors hover:text-retro-yellow"
+              className="inline-flex items-center gap-1.5 text-xs font-black uppercase tracking-wide text-cream/60 transition-colors hover:text-retro-yellow"
             >
               Explore more prompts
               <ArrowRight className="h-3.5 w-3.5" />

@@ -51,7 +51,7 @@ function parseOptions(value: unknown) {
 }
 
 export async function POST(req: NextRequest) {
-    const rateLimit = checkRateLimit(req.headers, {
+    const rateLimit = await checkRateLimit(req.headers, {
         namespace: "api-transaction",
         limit: 90,
         windowMs: 60_000,

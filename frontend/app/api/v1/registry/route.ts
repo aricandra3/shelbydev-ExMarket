@@ -569,7 +569,7 @@ async function loadPrompts(force = false): Promise<PromptMetadata[]> {
 }
 
 export async function GET(req: NextRequest) {
-    const rateLimit = checkRateLimit(req.headers, {
+    const rateLimit = await checkRateLimit(req.headers, {
         namespace: "api-registry",
         limit: 60,
         windowMs: 60_000,

@@ -53,7 +53,7 @@ export default function ExplorePage() {
                         "min-h-11 rounded-[7px] px-4 py-2 text-sm font-black transition-all",
                         !selectedCategory
                             ? "border-2 border-ink bg-retro-yellow text-ink shadow-neo-sm"
-                            : "border-2 border-transparent bg-cream/[0.04] text-cream/45 hover:border-cream/50 hover:text-cream"
+                            : "border-2 border-transparent bg-cream/[0.04] text-cream/60 hover:border-cream/60 hover:text-cream"
                     )}
                 >
                     All
@@ -66,7 +66,7 @@ export default function ExplorePage() {
                         "min-h-11 rounded-[7px] px-4 py-2 text-sm font-black transition-all",
                         selectedCategory === cat
                             ? "border-2 border-ink bg-retro-cyan text-ink shadow-neo-sm"
-                            : "border-2 border-transparent bg-cream/[0.04] text-cream/45 hover:border-cream/50 hover:text-cream"
+                            : "border-2 border-transparent bg-cream/[0.04] text-cream/60 hover:border-cream/60 hover:text-cream"
                     )}
                 >
                     {cat}
@@ -111,7 +111,7 @@ export default function ExplorePage() {
                 <>
                     {prompts.length === 0 ? (
                         <Card className="p-12 text-center">
-                            <p className="text-sm font-semibold text-cream/50">
+                            <p className="text-sm font-semibold text-cream/60">
                                 No prompts found. Be the first to create one!
                             </p>
                             <Link href="/create" className={buttonVariants({ className: "mt-5" })}>
@@ -146,7 +146,7 @@ export default function ExplorePage() {
                                             <span className="text-sm font-black text-retro-yellow">
                                                 {formatApt(prompt.price)}
                                             </span>
-                                            <span className="inline-flex items-center gap-1 rounded-[5px] border border-cream/20 bg-cream/[0.08] px-2 py-1 text-xs font-black uppercase text-cream/45">
+                                            <span className="inline-flex items-center gap-1 rounded-[5px] border border-cream/20 bg-cream/[0.08] px-2 py-1 text-xs font-black uppercase text-cream/60">
                                                 {prompt.totalUnlocks} unlocks
                                                 <ArrowRight className="h-3 w-3" />
                                             </span>

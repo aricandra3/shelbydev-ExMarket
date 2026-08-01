@@ -314,7 +314,7 @@ export default function PromptDetailPage() {
                     {!connected ? (
                         <div className="text-center py-4">
                             <Wallet className="mx-auto mb-4 h-10 w-10 text-retro-yellow" />
-                            <p className="mb-4 font-semibold text-cream/50">
+                            <p className="mb-4 font-semibold text-cream/60">
                                 Connect your wallet to unlock this prompt
                             </p>
                         </div>
@@ -342,7 +342,7 @@ export default function PromptDetailPage() {
                                 a quota that depletes, or nothing that expires. */}
                             {accessRecord.accessType === "subscription" &&
                                 accessRecord.expiresAt > 0 && (
-                                    <p className="mb-4 text-xs font-semibold text-cream/45">
+                                    <p className="mb-4 text-xs font-semibold text-cream/60">
                                         Access runs until{" "}
                                         <span className="text-cream/70">
                                             {new Date(
@@ -355,7 +355,7 @@ export default function PromptDetailPage() {
                                 )}
 
                             {accessRecord.accessType === "api" && (
-                                <p className="mb-4 text-xs font-semibold text-cream/45">
+                                <p className="mb-4 text-xs font-semibold text-cream/60">
                                     <span className="text-cream/70">
                                         {accessRecord.apiCallsRemaining}
                                     </span>{" "}
@@ -391,7 +391,7 @@ export default function PromptDetailPage() {
                                     {content}
                                 </div>
                             ) : (
-                                <p className="text-sm font-semibold text-cream/50">
+                                <p className="text-sm font-semibold text-cream/60">
                                     Loading content from Shelby...
                                 </p>
                             )}
@@ -457,7 +457,7 @@ export default function PromptDetailPage() {
                                             <Plus className="h-3.5 w-3.5" />
                                         </Button>
                                     </div>
-                                    <p className="mt-2 text-xs font-semibold text-cream/45">
+                                    <p className="mt-2 text-xs font-semibold text-cream/60">
                                         {isSubscription
                                             ? `${formatPeriod(periodSecs * quantity)} of access`
                                             : `${quantity} call${quantity === 1 ? "" : "s"}`}{" "}
@@ -490,7 +490,7 @@ export default function PromptDetailPage() {
                                 </p>
                             )}
 
-                            <p className="mt-4 text-xs font-semibold text-cream/35">
+                            <p className="mt-4 text-xs font-semibold text-cream/60">
                                 {90}% goes to the creator • {10}% platform fee
                             </p>
                         </div>

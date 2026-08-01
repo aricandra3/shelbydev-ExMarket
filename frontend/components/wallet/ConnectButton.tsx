@@ -141,7 +141,7 @@ export function ConnectButton() {
                                         <ShieldCheck className="h-3.5 w-3.5" />
                                         Connected
                                     </span>
-                                    <span className="truncate text-xs font-black uppercase text-cream/45">
+                                    <span className="truncate text-xs font-black uppercase text-cream/60">
                                         {wallet?.name ? getWalletLabel(wallet.name) : "Aptos"}
                                     </span>
                                 </div>
@@ -227,7 +227,7 @@ export function ConnectButton() {
                             <p className="text-[10px] font-black uppercase tracking-widest text-retro-yellow">
                                 Select wallet
                             </p>
-                            <p className="mt-1 text-xs font-semibold text-cream/45">
+                            <p className="mt-1 text-xs font-semibold text-cream/60">
                                 Choose the wallet you want to use for this session.
                             </p>
                         </div>
@@ -252,7 +252,7 @@ export function ConnectButton() {
                                                 {getWalletLabel(item.name)}
                                             </span>
                                         </span>
-                                        <span className="rounded-[5px] border border-cream/15 px-2 py-0.5 text-[10px] text-cream/45">
+                                        <span className="rounded-[5px] border border-cream/15 px-2 py-0.5 text-[10px] text-cream/60">
                                             Ready
                                         </span>
                                     </button>
@@ -266,10 +266,10 @@ export function ConnectButton() {
 
                         {unavailableWallets.length > 0 && (
                             <div className="border-t border-cream/10 px-3 py-2">
-                                <p className="text-[10px] font-black uppercase tracking-widest text-cream/35">
+                                <p className="text-[10px] font-black uppercase tracking-widest text-cream/60">
                                     Detected but unavailable
                                 </p>
-                                <p className="mt-1 truncate text-xs font-semibold text-cream/45">
+                                <p className="mt-1 truncate text-xs font-semibold text-cream/60">
                                     {unavailableWallets
                                         .map((item) => getWalletLabel(item.name))
                                         .join(", ")}

@@ -4,6 +4,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { SHELBY_RPC_URL } from "@/lib/constants";
 import { checkRateLimit, rateLimitHeaders } from "@/lib/apiSecurity";
+import { deleteDurableKey, getJson, setJson } from "@/lib/durableStore";
 import { verifyWalletProof } from "@/lib/walletProof";
 
 /// Every upload spends our Shelby storage quota under the caller's account, so
@@ -11,7 +12,7 @@ import { verifyWalletProof } from "@/lib/walletProof";
 /// knows the endpoint can write blobs on our key.
 const UPLOAD_PROOF_ACTION = "ExMarket Shelby upload";
 
-function requireUploadProof(
+async function requireUploadProof(
     req: NextRequest,
     account: string,
     blobName: string,
@@ -69,36 +70,19 @@ type ShelbyUploadBody = {
     uploadId?: unknown;
 };
 
-/// uploadId → the blob it belongs to, so a "complete" call can only finalize an
-/// upload this server actually started.
-///
-/// In-memory, which means it does not survive a cold start or span serverless
-/// instances. That is acceptable here because it is defense-in-depth, not the
-/// primary control: Shelby authorizes the finalize with our API key, and a
-/// caller who guessed an id could only finalize an upload that was going to be
-/// finalized anyway. A durable store (Redis/KV) is the fix if this ever needs
-/// to be authoritative — the same caveat applies to the rate limiter.
-const pendingUploads = new Map<
-    string,
-    { account: string; blobName: string; expiresAt: number }
->();
-
 const PENDING_UPLOAD_TTL_MS = 10 * 60 * 1000;
+type PendingUpload = { account: string; blobName: string };
 
-function rememberPendingUpload(uploadId: string, account: string, blobName: string) {
-    const now = Date.now();
+function pendingUploadKey(uploadId: string) {
+    return `exmarket:pending-upload:${uploadId}`;
+}
 
-    if (pendingUploads.size > 500) {
-        Array.from(pendingUploads.entries()).forEach(([id, entry]) => {
-            if (entry.expiresAt <= now) pendingUploads.delete(id);
-        });
-    }
-
-    pendingUploads.set(uploadId, {
-        account,
-        blobName,
-        expiresAt: now + PENDING_UPLOAD_TTL_MS,
-    });
+async function rememberPendingUpload(uploadId: string, account: string, blobName: string) {
+    await setJson<PendingUpload>(
+        pendingUploadKey(uploadId),
+        { account, blobName },
+        Math.ceil(PENDING_UPLOAD_TTL_MS / 1_000)
+    );
 }
 
 function buildRpcUrl(path: string) {
@@ -221,7 +205,7 @@ async function handleComplete(
         );
     }
 
-    const proof = requireUploadProof(req, body.account, body.blobName, "complete");
+    const proof = await requireUploadProof(req, body.account, body.blobName, "complete");
     if (!proof.ok) {
         return NextResponse.json(
             { error: proof.error, required_message: proof.requiredMessage },
@@ -230,7 +214,7 @@ async function handleComplete(
     }
 
     const uploadId = body.uploadId;
-    const pending = pendingUploads.get(uploadId);
+    const pending = await getJson<PendingUpload>(pendingUploadKey(uploadId));
 
     // Missing entries are tolerated (cold start / another instance), but a
     // mismatch against a known entry is a hard no.
@@ -270,7 +254,7 @@ async function handleComplete(
             );
         }
 
-        pendingUploads.delete(uploadId);
+        await deleteDurableKey(pendingUploadKey(uploadId));
 
         return NextResponse.json(
             { ok: true, completeMs: timings.completeMs },
@@ -393,7 +377,7 @@ function validateUploadBody(body: ShelbyUploadBody) {
 }
 
 export async function POST(req: NextRequest) {
-    const rateLimit = checkRateLimit(req.headers, {
+    const rateLimit = await checkRateLimit(req.headers, {
         namespace: "api-shelby-upload",
         limit: 30,
         windowMs: 60_000,
@@ -433,7 +417,7 @@ export async function POST(req: NextRequest) {
     const account = body.account as string;
     const blobName = body.blobName as string;
 
-    const proof = requireUploadProof(req, account, blobName, "start");
+    const proof = await requireUploadProof(req, account, blobName, "start");
     if (!proof.ok) {
         return NextResponse.json(
             { error: proof.error, required_message: proof.requiredMessage },
@@ -502,7 +486,7 @@ export async function POST(req: NextRequest) {
 
         // Bytes are transferred. Hand the uploadId back so the caller can
         // finalize separately and overlap that wait with its own work.
-        rememberPendingUpload(uploadId, account, blobName);
+        await rememberPendingUpload(uploadId, account, blobName);
         logStartTimings(timings, payloadBytes.length, partSize);
 
         return NextResponse.json(
