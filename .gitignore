@@ -13,6 +13,9 @@ Thumbs.db
 # Editor settings
 .vscode/
 
+# Local project planning and submission documents
+docs/
+
 # Environment secrets
 .env
 .env.*

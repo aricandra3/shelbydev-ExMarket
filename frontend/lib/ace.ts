@@ -12,7 +12,7 @@
 import { ace } from "@aptos-labs/ace-sdk";
 import { AccountAddress, type AccountPublicKey, type Signature } from "@aptos-labs/ts-sdk";
 
-import { MODULE_ADDRESS } from "./constants";
+import { APTOS_CHAIN_ID, MODULE_ADDRESS } from "./constants";
 
 // ── Committee ────────────────────────────────────────────────────────────────
 //
@@ -33,7 +33,7 @@ export const ACE_COMMITTEE = new ace.Committee({
 // Workers will call: exmarket::ace_access_control::check_permission(user, domain)
 
 export const ACE_CONTRACT_ID = ace.ContractID.newAptos({
-    chainId: 2, // Aptos testnet
+    chainId: APTOS_CHAIN_ID, // 2 = Aptos testnet, 118 = shelbynet
     moduleAddr: AccountAddress.fromString(MODULE_ADDRESS),
     moduleName: "ace_access_control",
     functionName: "check_permission",

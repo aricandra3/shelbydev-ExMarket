@@ -47,6 +47,15 @@ export const SHELBY_RPC_URL =
 export const SHELBY_CONTRACT_ADDRESS =
     "0x85fdb9a176ab8ef1d9d9c1b60d60b3924f0800ac1de1cc2085fb0b8bb4988e6a";
 
+// ── Aptos chain id ──────────────────────────────
+// Part of the ACE contract id: workers use it to know which chain to run
+// check_permission on. Wrong value = workers query the wrong chain and every
+// decryption fails.
+export const APTOS_CHAIN_ID = Number(
+    process.env.NEXT_PUBLIC_APTOS_CHAIN_ID ||
+        (NETWORK === "shelbynet" ? 118 : 2)
+);
+
 // ── ExMarket Smart Contract ─────────────────────
 export const MODULE_ADDRESS =
     process.env.NEXT_PUBLIC_MODULE_ADDRESS || "0x0"; // Set after deployment
