@@ -16,6 +16,9 @@ Thumbs.db
 # Local project planning and submission documents
 docs/
 
+# Local agent instructions, deliberately not part of the application history
+AGENTS.md
+
 # Environment secrets
 .env
 .env.*
